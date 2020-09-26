@@ -92,8 +92,11 @@ timer_sleep (int64_t ticks)
   int64_t start = timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+
+  /* Call sleep_thread_with_ticks() from threads/thread.c 
+     This function will really block and put the thread
+     into sleep_list in thread.c, not busy-waiting. */
+  sleep_thread_with_ticks (start, ticks);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -172,6 +175,13 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
+
+  /* When timer interrupt is occurred, compare current ticks 
+     with current closest tick and wake threads which have ticks
+     lower than closets ticks */ 
+  int64_t closest_tick = current_closest_tick ();
+  if (closest_tick <= ticks) 
+    wakeup_thread ();
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

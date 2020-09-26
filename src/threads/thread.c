@@ -71,6 +71,138 @@ static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
+/* own variable for project #1 */
+
+/* Thread's tick which is needed to wake first of all */
+static int64_t closest_tick = INT64_MAX;
+
+/* List of sleep threads */
+static struct list sleep_list;
+
+/* own functions for project #1 */
+
+// Prototype declaration
+int64_t current_closest_tick (void);
+void sleep_thread_with_ticks (int64_t start_tick, int64_t duration_tick);
+void wakeup_thread (void);
+bool priority_compare_func (struct list_elem *elem1, 
+                            struct list_elem *elem2, 
+                            void *aux);
+
+
+// Function Definition
+
+/* Return closets_tick which is the closest tick among slept threads */
+int64_t
+current_closest_tick (void)
+{
+  return closest_tick;
+}
+
+/* Given start_tick and duration_tick, let the current thread sleep until
+   (start_tick + duration_tick). After sleeping process, closest_tick
+   may need to be changed. By comparing current thread's tick_to_wake and
+   current closest_tick, update closest_tick and update sleep_list 
+
+   Here, we defined the keyword 'sleep' as the composition of blocking
+   the thread and pushing it into sleep_list. */
+void
+sleep_thread_with_ticks (int64_t start_tick, int64_t duration_tick)
+{
+  /* During the job of sleeping thread, interrupt must not be occurred. */
+  enum intr_level old_level = intr_disable ();
+  struct thread *current_thread = thread_current ();
+
+  // ASSERT(current_thread != initial_thread);
+  /* If no thread is in ready list, idle thread will be active.
+     idle thread must not be slept.*/
+  ASSERT (current_thread != idle_thread);
+
+  /* Store tick to wake into current thread's member tick_to_wake.
+     This member variable will be used to update new closest tick
+     in wakeup_thread() function. */
+  current_thread->tick_to_wake = start_tick + duration_tick;
+
+  /* Update closest tick by comparing current thread's tick_to_wake. */
+  if (current_thread->tick_to_wake < closest_tick)
+    closest_tick = current_thread->tick_to_wake;
+  
+  /* Push current_thread's element into sleep_list and block the 
+     thread. */
+  list_push_back (&sleep_list, &current_thread->elem);
+  thread_block ();
+
+  /* Enable interrupt */
+  intr_set_level (old_level);
+}
+
+/* Wake up the threads which have low tick_to_wake compared to
+   closest_tick from sleep_list. By iterating sleep_list, find 
+   such threads and unblock them. And update closest_tick.
+   
+   Here, we defined the keyword 'wake up' as the composition of
+   unblocking the thread and pop it from sleep_list. */
+void
+wakeup_thread (void){
+  /* Choose firt element of sleep_list for iteration */
+  struct list_elem* e = list_begin (&sleep_list);
+
+  while(e != list_end (&sleep_list))
+    {
+      /* Get the entry of sleep_list as a struct thread*/
+      struct thread* t = list_entry (e, struct thread, elem);
+      
+      /* unblock all threads which have tick lower than 
+        closest tick */
+      if( t->tick_to_wake <= closest_tick )
+        {
+          e = list_remove (&t->elem); 
+          thread_unblock (t);
+        }
+      else
+          e = list_next (e);
+    }
+
+  /* Update closest tick by iterating sleep_list */
+  int64_t min = INT64_MAX;
+  e = list_begin (&sleep_list);
+
+  while (e != list_end (&sleep_list))
+    {
+      struct thread* t = list_entry (e, struct thread, elem);
+
+      if (t->tick_to_wake < min)
+        min = t->tick_to_wake;
+      
+      e = list_next (e);
+    }
+  
+  closest_tick = min;
+}
+
+/* The comparing function for comparing priority between thread.
+   For example, struct list waiters in struct semaphore and ready
+   _list store threads as list elements. Those lists need to compare
+   thread's priority. This function is used as an argument of list_
+   sort() and list_insert_ordered() with the adress of list. */
+bool
+priority_compare_func (struct list_elem *elem1, 
+                       struct list_elem *elem2, 
+                       void *aux)
+{
+  bool closer;
+
+  struct thread *t1 = list_entry (elem1, struct thread, elem);
+  struct thread *t2 = list_entry (elem2, struct thread, elem);
+
+  if (t1->priority > t2->priority)
+    closer = true;
+  else
+    closer = false;
+  
+  return closer;
+}
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -92,6 +224,9 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
+
+  /* Initialize sleep_list */
+  list_init (&sleep_list);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -201,6 +336,11 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+  /* Check if created thread has bigger priority than running
+     thread. If true, need to schedule again. */
+  if (thread_current ()->priority < t->priority)
+    thread_yield ();
+  
   return tid;
 }
 
@@ -237,7 +377,11 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  /* Insert thread into ready list with comparing function */
+  list_insert_ordered (&ready_list, 
+                       &t->elem, 
+                       priority_compare_func, 
+                       NULL);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -308,7 +452,11 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+    /* Insert current thread into ready list with comparing function*/
+    list_insert_ordered(&ready_list, 
+                        &cur->elem, 
+                        priority_compare_func, 
+                        NULL);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -335,7 +483,30 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+  /* When you can ensure that the thread must change its priority and 
+     old_priority without the posibility of donations, use this function.
+     Otherwise, we recommend you to directly modify thread's priority 
+     depending on situation.
+  */
+  struct thread *current_thread = thread_current();
+
+  /* store current_priority */
+  int current_priority = current_thread->priority;
+  
+  if(current_priority != current_thread->old_priority &&
+    current_priority > new_priority)
+  {
+      current_thread->old_priority = new_priority;
+      return;
+  } 
+
+  /* change thread's priority to new_priority */
+    current_thread->priority = new_priority;
+    current_thread->old_priority = new_priority;
+
+  /* check priority degradation and schedule again */
+  //if (current_priority > new_priority)
+  thread_yield ();
 }
 
 /* Returns the current thread's priority. */
@@ -463,6 +634,11 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+
+  /* Initialization of data structure for project 1 */
+  list_init(&t->donation_threads);
+  t->old_priority = priority;
+  t->wait_lock = NULL;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
