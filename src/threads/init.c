@@ -128,7 +128,6 @@ main (void)
 #endif
 
   printf ("Boot complete.\n");
-  printf ("<1> offset = %d\n", offsetof(struct thread, name));
   
   /* Run actions specified on kernel command line. */
   run_actions (argv);
