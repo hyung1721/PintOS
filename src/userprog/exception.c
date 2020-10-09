@@ -4,6 +4,8 @@
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "syscall.h"
+#include "threads/vaddr.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -79,6 +81,7 @@ kill (struct intr_frame *f)
      exceptions back to the process via signals, but we don't
      implement them. */
      
+  thread_set_killed ();
   /* The interrupt frame's code segment value tells us where the
      exception originated. */
   switch (f->cs)
@@ -147,6 +150,9 @@ page_fault (struct intr_frame *f)
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
+  
+  if (!user || not_present || is_kernel_vaddr(fault_addr))
+      syscall_exit (-1);
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to

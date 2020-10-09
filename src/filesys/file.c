@@ -3,6 +3,7 @@
 #include "filesys/inode.h"
 #include "threads/malloc.h"
 
+
 /* An open file. */
 struct file 
   {
@@ -10,6 +11,11 @@ struct file
     off_t pos;                  /* Current position. */
     bool deny_write;            /* Has file_deny_write() been called? */
   };
+
+
+bool get_deny_write(struct file* file){
+  return file->deny_write;
+}
 
 /* Opens a file for the given INODE, of which it takes ownership,
    and returns the new file.  Returns a null pointer if an

@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -92,17 +93,26 @@ struct thread
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
-    struct list_elem elem_d;            /* List element for donation list. */
+   //  struct list_elem elem_d;            /* List element for donation list. */
 
     int64_t tick_to_wake;               /* Ticks at which a thread should wake. */
-    
-    int old_priority;                   /* Priority which holds original value. */
-    struct lock *wait_lock;             /* Lock on which this thread is waiting. */
-    struct list donation_threads;       /* List of threads that donated to this thread. */
+   //  int old_priority;                   /* Priority which holds original value. */
+   //  struct lock *wait_lock;             /* Lock on which this thread is waiting. */
+   //  struct list donation_threads;       /* List of threads that donated to this thread. */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    struct list children;               /* List of child process. */
+    struct list_elem elem_child;        /* List element for children list. */
+    struct file* fd_table[128];         /* Array of file descriptor.  */
+
+    int status_exit;                    /* Exit status for exit() system call. */
+    struct semaphore exit_sema;         /* Semaphore for synchronization of exiting child. */
+    struct semaphore delete_sema;       /* Semaphore for synchronization of deleting child from children. */
+   
+    bool failed;                        /* Boolean which represents failure of load() function. */
+    bool loaded;                        /* Boolean which represents success of load() function. */
 #endif
 
     /* Owned by thread.c. */
@@ -123,13 +133,16 @@ void thread_print_stats (void);
 typedef void thread_func (void *aux);
 tid_t thread_create (const char *name, int priority, thread_func *, void *);
 
-/* Own functions for Project #1 */
-int64_t current_closest_tick (void);
-void sleep_thread_with_ticks (int64_t start_tick, int64_t duration_tick);
-void wakeup_thread (void);
-bool priority_compare_func (struct list_elem *elem1, 
-                            struct list_elem *elem2, 
-                            void *aux);
+// /* Own functions for Project #1 */
+// int64_t current_closest_tick (void);
+// void sleep_thread_with_ticks (int64_t start_tick, int64_t duration_tick);
+// void wakeup_thread (void);
+// bool priority_compare_func (struct list_elem *elem1, 
+//                             struct list_elem *elem2, 
+//                             void *aux);
+
+struct thread *get_thread_with_pid(tid_t pid);
+void thread_set_killed ();
 
 void thread_block (void);
 void thread_unblock (struct thread *);

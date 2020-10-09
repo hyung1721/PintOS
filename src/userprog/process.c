@@ -17,9 +17,56 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/synch.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+
+/* Own functions for project #2 */
+
+/* Prototype declaration */
+void push_arguments(int argc, char **argv, void **esp);
+
+/* Function definition */
+void
+push_arguments(int argc, char **argv, void **esp)
+{
+  int i, current_len, total_len;
+  //printf("original esp: %p\n", *esp);
+
+  total_len = 0;
+  for (i = (argc - 1); i >= 0; i--)
+  {
+    current_len = strlen(argv[i]);
+    total_len += (current_len + 1);
+    *esp -= (current_len + 1);
+    strlcpy(*esp, argv[i], current_len + 1);
+    argv[i] = *esp;
+  }
+
+  int diff = 4 - (total_len % 4);
+  *esp -= diff;
+  /* we didn't set word-aliged to 0 */
+
+  for (i = argc; i >= 0; i--)
+  {
+    *esp -= 4;
+    **(uint32_t **)esp = argv[i];
+  }
+
+  *esp -= 4;
+  **(uint32_t **)esp = *esp + 4; // pointer to argv[0] in stack
+
+  *esp -= 4;
+  **(uint32_t **)esp = (uint32_t)argc;
+
+  *esp -= 4;
+  **(uint32_t **)esp = 0;
+
+  // hex_dump(*esp, *esp, PHYS_BASE-(*esp), true);
+
+  free(argv);
+}
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -30,6 +77,13 @@ process_execute (const char *file_name)
 {
   char *fn_copy;
   tid_t tid;
+  struct thread *current_thread = thread_current ();
+  struct thread *new_thread;
+
+  //printf("file name : %s\n", file_name);
+  // char *thread_name, *save_ptr;
+
+  // thread_name = strtok_r (file_name, " ", &save_ptr);
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
@@ -42,6 +96,11 @@ process_execute (const char *file_name)
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
+  else
+  {
+    new_thread = get_thread_with_pid(tid);
+    list_push_back (&current_thread->children, &new_thread->elem_child);
+  }
   return tid;
 }
 
@@ -51,20 +110,56 @@ static void
 start_process (void *file_name_)
 {
   char *file_name = file_name_;
+  char temp_file_name[128];
   struct intr_frame if_;
   bool success;
+
+  char *token, *save_ptr;
+  int argc = 0;
+  char **argv;
+  int i;
+  
+  strlcpy (temp_file_name, file_name, strlen (file_name) + 1);
+
+  for (token = strtok_r (temp_file_name, " ", &save_ptr); token != NULL;
+       token = strtok_r (NULL, " ", &save_ptr))
+  {
+    argc++;
+  }
+
+  argv = (char **)malloc(sizeof(char *) * (argc + 1) );
+  
+  strlcpy (temp_file_name, file_name, strlen (file_name) + 1);
+
+  for (i = 0, token = strtok_r (temp_file_name, " ", &save_ptr);
+       i < argc;
+       i++, token = strtok_r (NULL, " ", &save_ptr))
+  {
+    argv[i] = token;
+  }
+
+  argv[argc] = 0;
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+  success = load (argv[0], &if_.eip, &if_.esp);
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success) 
+  {
+    thread_current ()->failed = true;
     thread_exit ();
+  }
+  else
+  {
+    /* Do pushing arguments into stack. */
+    thread_current ()->loaded = true;
+    push_arguments(argc, argv, &if_.esp);
+  }
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -86,8 +181,28 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
+  struct thread *current_thread = thread_current ();
+  struct list *children = &current_thread->children;
+  struct list_elem *e;
+  struct thread *t;
+  int ret;
+
+  for (e = list_begin (children); e != list_end (children); e = list_next (e))
+  {
+    t = list_entry (e, struct thread, elem_child);
+    
+    if (t->tid == child_tid)
+    {
+      sema_down (&t->exit_sema);
+      list_remove (&t->elem_child);
+      ret = t->status_exit;
+      sema_up (&t->delete_sema);
+
+      return ret;
+    }
+  }
   return -1;
 }
 
@@ -114,6 +229,9 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+
+  sema_up (&cur->exit_sema);
+  sema_down (&cur->delete_sema);
 }
 
 /* Sets up the CPU for running user code in the current

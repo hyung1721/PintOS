@@ -85,9 +85,9 @@ static struct list sleep_list;
 int64_t current_closest_tick (void);
 void sleep_thread_with_ticks (int64_t start_tick, int64_t duration_tick);
 void wakeup_thread (void);
-bool priority_compare_func (struct list_elem *elem1, 
-                            struct list_elem *elem2, 
-                            void *aux);
+// bool priority_compare_func (struct list_elem *elem1, 
+//                             struct list_elem *elem2, 
+//                             void *aux);
 
 
 // Function Definition
@@ -180,27 +180,54 @@ wakeup_thread (void){
   closest_tick = min;
 }
 
-/* The comparing function for comparing priority between thread.
-   For example, struct list waiters in struct semaphore and ready
-   _list store threads as list elements. Those lists need to compare
-   thread's priority. This function is used as an argument of list_
-   sort() and list_insert_ordered() with the adress of list. */
-bool
-priority_compare_func (struct list_elem *elem1, 
-                       struct list_elem *elem2, 
-                       void *aux)
-{
-  bool closer;
+// /* The comparing function for comparing priority between thread.
+//    For example, struct list waiters in struct semaphore and ready
+//    _list store threads as list elements. Those lists need to compare
+//    thread's priority. This function is used as an argument of list_
+//    sort() and list_insert_ordered() with the adress of list. */
+// bool
+// priority_compare_func (struct list_elem *elem1, 
+//                        struct list_elem *elem2, 
+//                        void *aux)
+// {
+//   bool closer;
 
-  struct thread *t1 = list_entry (elem1, struct thread, elem);
-  struct thread *t2 = list_entry (elem2, struct thread, elem);
+//   struct thread *t1 = list_entry (elem1, struct thread, elem);
+//   struct thread *t2 = list_entry (elem2, struct thread, elem);
 
-  if (t1->priority > t2->priority)
-    closer = true;
-  else
-    closer = false;
+//   if (t1->priority > t2->priority)
+//     closer = true;
+//   else
+//     closer = false;
   
-  return closer;
+//   return closer;
+// }
+
+/* own functions for project #2 */
+
+struct thread *get_thread_with_pid(tid_t pid);
+void thread_set_killed();
+
+struct thread *
+get_thread_with_pid(tid_t pid)
+{
+  struct list_elem *e;
+  
+  for (e = list_begin (&all_list); e != list_end (&all_list);
+      e = list_next (e))
+  {
+    struct thread *t = list_entry (e, struct thread, allelem);
+    
+    if (t->tid == pid)
+      return t;
+  }
+}
+
+void
+thread_set_killed()
+{
+  struct thread *current_thread = thread_current ();
+  current_thread->status_exit = -1;
 }
 
 /* Initializes the threading system by transforming the code
@@ -338,8 +365,8 @@ thread_create (const char *name, int priority,
 
   /* Check if created thread has bigger priority than running
      thread. If true, need to schedule again. */
-  if (thread_current ()->priority < t->priority)
-    thread_yield ();
+  // if (thread_current ()->priority < t->priority)
+  //   thread_yield ();
   
   return tid;
 }
@@ -377,11 +404,12 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  /* Insert thread into ready list with comparing function */
-  list_insert_ordered (&ready_list, 
-                       &t->elem, 
-                       priority_compare_func, 
-                       NULL);
+  list_push_back (&ready_list, &t->elem);
+  // /* Insert thread into ready list with comparing function */
+  // list_insert_ordered (&ready_list, 
+  //                      &t->elem, 
+  //                      priority_compare_func, 
+  //                      NULL);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -451,12 +479,13 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (cur != idle_thread) 
-    /* Insert current thread into ready list with comparing function*/
-    list_insert_ordered(&ready_list, 
-                        &cur->elem, 
-                        priority_compare_func, 
-                        NULL);
+  list_push_back (&ready_list, &cur->elem);
+  // if (cur != idle_thread) 
+  //   /* Insert current thread into ready list with comparing function*/
+  //   list_insert_ordered(&ready_list, 
+  //                       &cur->elem, 
+  //                       priority_compare_func, 
+  //                       NULL);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -483,30 +512,31 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  /* When you can ensure that the thread must change its priority and 
-     old_priority without the posibility of donations, use this function.
-     Otherwise, we recommend you to directly modify thread's priority 
-     depending on situation.
-  */
-  struct thread *current_thread = thread_current();
+  thread_current ()->priority = new_priority;
+  // /* When you can ensure that the thread must change its priority and 
+  //    old_priority without the posibility of donations, use this function.
+  //    Otherwise, we recommend you to directly modify thread's priority 
+  //    depending on situation.
+  // */
+  // struct thread *current_thread = thread_current();
 
-  /* store current_priority */
-  int current_priority = current_thread->priority;
+  // /* store current_priority */
+  // int current_priority = current_thread->priority;
   
-  if(current_priority != current_thread->old_priority &&
-    current_priority > new_priority)
-  {
-      current_thread->old_priority = new_priority;
-      return;
-  } 
+  // if(current_priority != current_thread->old_priority &&
+  //   current_priority > new_priority)
+  // {
+  //     current_thread->old_priority = new_priority;
+  //     return;
+  // } 
 
-  /* change thread's priority to new_priority */
-    current_thread->priority = new_priority;
-    current_thread->old_priority = new_priority;
+  // /* change thread's priority to new_priority */
+  //   current_thread->priority = new_priority;
+  //   current_thread->old_priority = new_priority;
 
-  /* check priority degradation and schedule again */
-  //if (current_priority > new_priority)
-  thread_yield ();
+  // /* check priority degradation and schedule again */
+  // //if (current_priority > new_priority)
+  // thread_yield ();
 }
 
 /* Returns the current thread's priority. */
@@ -635,10 +665,22 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->magic = THREAD_MAGIC;
 
-  /* Initialization of data structure for project 1 */
-  list_init(&t->donation_threads);
-  t->old_priority = priority;
-  t->wait_lock = NULL;
+  // /* Initialization of data structure for project 1 */
+  // list_init(&t->donation_threads);
+  // t->old_priority = priority;
+  // t->wait_lock = NULL;
+
+#ifdef USERPROG
+  list_init (&t->children);
+  sema_init (&t->exit_sema, 0);
+  sema_init (&t->delete_sema, 0);
+
+  t->failed = false;
+  t->loaded = false;
+  
+  for(int i = 0 ; i < 128 ; i++)
+    t->fd_table[i] = NULL;
+#endif
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
