@@ -28,25 +28,48 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 void push_arguments(int argc, char **argv, void **esp);
 
 /* Function definition */
+
+/* Push arguments specified by argc and argv into stack, which is 
+   pointed by esp. This function works like following steps.
+   
+   For example command, '/bin/ls -l foo bar',
+   push_arguments() pushes arguments in the following order.
+   
+   1. Push 'bar\0', 'foo\0', '-l\0', and '/bin/ls\0'.
+   2. Push word_align.
+   3. Push zero for argv[4]
+   4. Push the address of 'bar\0' in stack.
+   5. Push the address of 'foo' in stack.
+   6. Push the address of '-l\0' in stack.
+   7. Push the address of '/bin/ls\0' in stack.
+   8. Push the address of argv[0] in stack, which represents argv.
+   9. Push the return address, which is zero.
+
+   The order of pushing arguments is based on 80x86 calling
+   convention in Pintos manual. */
 void
 push_arguments(int argc, char **argv, void **esp)
 {
-  int i, current_len, total_len;
-  //printf("original esp: %p\n", *esp);
-
-  total_len = 0;
+  int i, current_len, total_len = 0;
+  
   for (i = (argc - 1); i >= 0; i--)
   {
     current_len = strlen(argv[i]);
     total_len += (current_len + 1);
+
+    /* Decrease esp by (length of current argument + 1)
+       where +1 is needed for including '\0' at the end of argument */
     *esp -= (current_len + 1);
     strlcpy(*esp, argv[i], current_len + 1);
+
+    /* Replace i-th element of argv with argument's address
+       in stack. This address will be pushed in stack again. */
     argv[i] = *esp;
   }
 
+  /* Word-aligned bytes */
   int diff = 4 - (total_len % 4);
   *esp -= diff;
-  /* we didn't set word-aliged to 0 */
 
   for (i = argc; i >= 0; i--)
   {
@@ -54,12 +77,15 @@ push_arguments(int argc, char **argv, void **esp)
     **(uint32_t **)esp = argv[i];
   }
 
+  /* Push pointer to argv[0] in stack */
   *esp -= 4;
-  **(uint32_t **)esp = *esp + 4; // pointer to argv[0] in stack
+  **(uint32_t **)esp = *esp + 4; 
 
+  /* Push  argument count in stack. */
   *esp -= 4;
   **(uint32_t **)esp = (uint32_t)argc;
 
+  /* Push return address, 0, in stack. */
   *esp -= 4;
   **(uint32_t **)esp = 0;
 
@@ -121,12 +147,14 @@ start_process (void *file_name_)
   
   strlcpy (temp_file_name, file_name, strlen (file_name) + 1);
 
+  /* Count the number of argument passed by aux (= file_name_). */
   for (token = strtok_r (temp_file_name, " ", &save_ptr); token != NULL;
        token = strtok_r (NULL, " ", &save_ptr))
   {
     argc++;
   }
 
+  /* Store each arguments into argv by using strtok_r(). */
   argv = (char **)malloc(sizeof(char *) * (argc + 1) );
   
   strlcpy (temp_file_name, file_name, strlen (file_name) + 1);
@@ -138,6 +166,8 @@ start_process (void *file_name_)
     argv[i] = token;
   }
 
+  /* This is for zero bytes in stack, which wiil be used in
+     push_arguments(). */
   argv[argc] = 0;
 
   /* Initialize interrupt frame and load executable. */
@@ -195,14 +225,21 @@ process_wait (tid_t child_tid)
     
     if (t->tid == child_tid)
     {
+      /* Wait until child process is successfully loaded. */
       sema_down (&t->exit_sema);
       list_remove (&t->elem_child);
+
+      /* Retrieve child process's exit status. */
       ret = t->status_exit;
+
+      /* Signal to child that deleting would be fine. */
       sema_up (&t->delete_sema);
 
       return ret;
     }
   }
+
+  /* There is no such child. */
   return -1;
 }
 
@@ -230,7 +267,10 @@ process_exit (void)
       pagedir_destroy (pd);
     }
 
+  /* Signal to parent that child can exit. */
   sema_up (&cur->exit_sema);
+  /* Wait until parent remove child from parent's children and 
+     retrieve child's exit status. */
   sema_down (&cur->delete_sema);
 }
 

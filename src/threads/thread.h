@@ -25,6 +25,9 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
+/* File Descriptor table. */
+#define FD_MAX_SIZE 128                 /* Maximum size of fd_table. */
+
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -105,7 +108,7 @@ struct thread
     uint32_t *pagedir;                  /* Page directory. */
     struct list children;               /* List of child process. */
     struct list_elem elem_child;        /* List element for children list. */
-    struct file* fd_table[128];         /* Array of file descriptor.  */
+    struct file* fd_table[FD_MAX_SIZE]; /* Array of file descriptor.  */
 
     int status_exit;                    /* Exit status for exit() system call. */
     struct semaphore exit_sema;         /* Semaphore for synchronization of exiting child. */

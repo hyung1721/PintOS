@@ -203,11 +203,15 @@ wakeup_thread (void){
 //   return closer;
 // }
 
-/* own functions for project #2 */
+/* Own functions for project #2 */
 
+/* Prototype Declarations */
 struct thread *get_thread_with_pid(tid_t pid);
 void thread_set_killed();
 
+/* Function Definitions */
+
+/* Given pid, find the thread which has same tid with pid. */
 struct thread *
 get_thread_with_pid(tid_t pid)
 {
@@ -223,6 +227,8 @@ get_thread_with_pid(tid_t pid)
   }
 }
 
+/* If process was killed, kernel need to explicitly change the 
+   process's exit status with -1 in our implementation. */
 void
 thread_set_killed()
 {
@@ -678,7 +684,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->failed = false;
   t->loaded = false;
   
-  for(int i = 0 ; i < 128 ; i++)
+  for(int i = 0 ; i < FD_MAX_SIZE ; i++)
     t->fd_table[i] = NULL;
 #endif
 

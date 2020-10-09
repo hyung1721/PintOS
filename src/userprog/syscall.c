@@ -38,6 +38,8 @@ void syscall_seek (int, unsigned);
 unsigned syscall_tell (int);
 void syscall_close (int);
 
+void check_child_before_exit(struct thread *);
+
 void
 syscall_init (void) 
 {
@@ -171,11 +173,13 @@ syscall_exit (int status)
   cur->status_exit = status;
 
   /* Close all opened files of this process to avoid memory leaks. */
-  for (int i = 2; i < 128; i++)
+  for (int i = 2; i < FD_MAX_SIZE; i++)
   {
     if (fd_table[i] != NULL)
       syscall_close(i);
   }
+
+  check_child_before_exit(cur);
 
   /* Process termination message with status. */
   printf ("%s: exit(%d)\n", token, status);
@@ -265,7 +269,7 @@ syscall_open(const char* filename)
   struct file **fd_table = current_thread->fd_table;
   struct file *opened_file;
   char *token, *save_ptr;
-  int new_fd = -1;
+  int new_fd = -1, i = 0;
   
   opened_file = filesys_open (filename);
 
@@ -281,7 +285,7 @@ syscall_open(const char* filename)
     file_deny_write (opened_file);
 
   /* Update current process's file descriptor table. */
-  for (int i = 2 ; i < 128; i++)
+  for (i = 2 ; i < FD_MAX_SIZE; i++)
   {
     if (fd_table[i] == NULL)
     {
@@ -291,6 +295,9 @@ syscall_open(const char* filename)
     } 
   }
   
+  if (i == FD_MAX_SIZE)
+    file_close (opened_file);
+
   return new_fd;
 }
 
@@ -304,7 +311,7 @@ syscall_filesize (int fd)
   struct file **fd_table = current_thread->fd_table ; 
  
   /* Check the validity of the fd. */
-  if (fd < 2 || fd > 127)
+  if (fd < 2 || fd >= FD_MAX_SIZE)
     syscall_exit (-1);
   if (fd_table[fd] == NULL)
     syscall_exit (-1);
@@ -337,7 +344,7 @@ syscall_read (int fd, void *buffer, unsigned size)
   }
   
   /* Check the validity of the fd. */
-  if (fd < 0 || fd == 1 || fd > 127)
+  if (fd < 0 || fd == 1 || fd >= FD_MAX_SIZE)
     syscall_exit (-1);
   else if (fd_table[fd] == NULL)
     syscall_exit (-1);
@@ -361,7 +368,7 @@ syscall_write (int fd, const void *buffer, unsigned size)
   }
   
   /* Check the validity of the fd. */
-  if (fd < 1 || fd > 127)
+  if (fd < 1 || fd >= FD_MAX_SIZE)
     syscall_exit (-1); 
   else if (fd_table[fd] == NULL)
     syscall_exit (-1);
@@ -384,7 +391,7 @@ syscall_seek (int fd, unsigned position)
   struct file **fd_table = current_thread->fd_table ; 
 
   /* Check the validity of the fd. */
-  if (fd > 127 || fd < 2)
+  if (fd < 2 || fd >= FD_MAX_SIZE)
     syscall_exit (-1);
   if (fd_table[fd] == NULL)
     syscall_exit (-1);
@@ -403,7 +410,7 @@ syscall_tell (int fd)
   struct file **fd_table = current_thread->fd_table ; 
 
   /* Check the validity of the fd. */
-  if (fd > 127 || fd < 2)
+  if (fd < 2 || fd >= FD_MAX_SIZE)
     syscall_exit (-1);
   if (fd_table[fd] == NULL)
     syscall_exit (-1);
@@ -420,7 +427,7 @@ syscall_close (int fd)
   struct file **fd_table = current_thread->fd_table;
 
   /* Check the validity of the fd. */
-  if (fd > 127 || fd < 2)
+  if (fd < 2 || fd >= FD_MAX_SIZE)
     syscall_exit (-1);
   if (fd_table[fd] == NULL)
     syscall_exit (-1);
@@ -428,4 +435,18 @@ syscall_close (int fd)
   /* After closing fd, fd_table must be updated. */
   file_close(fd_table[fd]);
   fd_table[fd] = NULL;
+}
+
+void
+check_child_before_exit (struct thread *t)
+{
+  struct list *children = &t->children;
+  struct list_elem *e;
+  struct thread *child;
+
+  for (e = list_begin (children); e != list_end (children); e = list_next (e))
+  {
+    child = list_entry (e, struct thread, elem_child);
+    syscall_wait(child->tid);
+  }
 }
