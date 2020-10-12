@@ -124,6 +124,7 @@ process_execute (const char *file_name)
     palloc_free_page (fn_copy); 
   else
   {
+    /* If creation succeed, this thread should be child of current thread. */
     new_thread = get_thread_with_pid(tid);
     list_push_back (&current_thread->children, &new_thread->elem_child);
   }

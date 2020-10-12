@@ -437,6 +437,9 @@ syscall_close (int fd)
   fd_table[fd] = NULL;
 }
 
+/* Check if there are children which does not exit yet.
+   And do sema_up(&delete_sema) for those child because 
+   they may wait delete_sema to be up in process_exit().*/
 void
 check_child_before_exit (struct thread *t)
 {
@@ -447,6 +450,6 @@ check_child_before_exit (struct thread *t)
   for (e = list_begin (children); e != list_end (children); e = list_next (e))
   {
     child = list_entry (e, struct thread, elem_child);
-    syscall_wait(child->tid);
+    sema_up (&child->delete_sema);
   }
 }
