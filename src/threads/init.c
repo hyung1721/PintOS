@@ -22,6 +22,7 @@
 #include "threads/palloc.h"
 #include "threads/pte.h"
 #include "threads/thread.h"
+#include "vm/swap.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #include "userprog/exception.h"
@@ -126,7 +127,8 @@ main (void)
   locate_block_devices ();
   filesys_init (format_filesys);
 #endif
-
+  init_frame_table();
+  init_swap();
   printf ("Boot complete.\n");
   
   /* Run actions specified on kernel command line. */
@@ -176,9 +178,10 @@ paging_init (void)
           pt = palloc_get_page (PAL_ASSERT | PAL_ZERO);
           pd[pde_idx] = pde_create (pt);
         }
-
+      
       pt[pte_idx] = pte_create_kernel (vaddr, !in_kernel_text);
     }
+  printf("pt : %p\n", pt);
 
   /* Store the physical address of the page directory into CR3
      aka PDBR (page directory base register).  This activates our

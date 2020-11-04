@@ -18,6 +18,11 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "threads/synch.h"
+#include "vm/page.h"
+#include "vm/frame.h"
+
+#define STACK_HEURISTIC 32
+#define MAX_PAGE_STACK 2048
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -171,6 +176,10 @@ start_process (void *file_name_)
      push_arguments(). */
   argv[argc] = 0;
 
+
+  /* For project #3 */
+  init_spt (&thread_current()->spt);
+
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -253,6 +262,10 @@ process_exit (void)
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
+  
+  free_frame_entry(cur);
+  
+  destroy_spt(&cur->spt);
   pd = cur->pagedir;
   if (pd != NULL) 
     {
@@ -406,7 +419,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   for (i = 0; i < ehdr.e_phnum; i++) 
     {
       struct Elf32_Phdr phdr;
-
+      //printf("%dth iteration\n", i);
       if (file_ofs < 0 || file_ofs > file_length (file))
         goto done;
       file_seek (file, file_ofs);
@@ -460,6 +473,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
         }
     }
 
+  //printf("here?\n");
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
@@ -538,6 +552,7 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
 
    Return true if successful, false if a memory allocation error
    or disk read error occurs. */
+  
 static bool
 load_segment (struct file *file, off_t ofs, uint8_t *upage,
               uint32_t read_bytes, uint32_t zero_bytes, bool writable) 
@@ -545,24 +560,43 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
+  struct spt_entry *created_spte;
 
+  //printf("load segment begin with writable : %d upage : %p\n", writable, upage);
   file_seek (file, ofs);
   while (read_bytes > 0 || zero_bytes > 0) 
     {
+      
       /* Calculate how to fill this page.
          We will read PAGE_READ_BYTES bytes from FILE
          and zero the final PAGE_ZERO_BYTES bytes. */
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
+      //printf("page read bytes : %d\n", page_read_bytes);
+      
+
+      created_spte = create_spte_from_exec(file, ofs, upage, 
+                                            page_read_bytes, page_zero_bytes, writable);
+      
+      if (created_spte == NULL)
+         return false;
+      
+      
       /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
+      uint8_t *kpage = frame_alloc (PAL_USER, created_spte);
+      //printf("upage : %p kpage: %p | ", upage, kpage);
+      
       if (kpage == NULL)
-        return false;
+      {
+        //printf("here4\n");
+        free (created_spte);
+      }
 
       /* Load this page. */
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-        {
+        { 
+          //printf("C\n");
           palloc_free_page (kpage);
           return false; 
         }
@@ -571,6 +605,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       /* Add the page to the process's address space. */
       if (!install_page (upage, kpage, writable)) 
         {
+          //printf("B\n");
           palloc_free_page (kpage);
           return false; 
         }
@@ -580,6 +615,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
     }
+  //printf("load segment end\n");
   return true;
 }
 
@@ -588,15 +624,21 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (void **esp) 
 {
-  uint8_t *kpage;
+  uint8_t *kpage, *upage;
   bool success = false;
 
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+  upage = ((uint8_t *) PHYS_BASE) - PGSIZE;
+
+  struct spt_entry *new_entry = create_spte_from_stack (upage);
+  kpage = frame_alloc (PAL_USER | PAL_ZERO, new_entry);
+
   if (kpage != NULL) 
     {
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
+      success = install_page (upage, kpage, true);
       if (success)
+      {
         *esp = PHYS_BASE;
+      }
       else
         palloc_free_page (kpage);
     }
@@ -621,4 +663,92 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+/* Load page from swap disk by using supplemental page table
+   entry. First, allocate frame and install a mapping between
+   upage and frame. And, call swap_in() fuction to load a page
+   from swap disk. */
+bool
+load_from_swap (struct spt_entry *spte)
+{
+  ASSERT (spte != NULL);
+  
+  uint8_t *frame = frame_alloc (PAL_USER, spte);
+  
+  //printf("frame %p\n", frame);
+  //printf("Frame allocate done\n");
+  if (!frame)
+      return false;
+
+  if (!install_page (spte->upage, frame, spte->writable))
+  {
+      //frame_free(frame);
+      return false;
+  }
+  
+  //printf("install page done\n");
+  spte->paddr = frame;
+  //printf("SWAP_IN - swap_index: %d upage: %p frame: %p\n",spte->swap_index, spte->upage,frame);
+  swap_in (spte->swap_index, spte->paddr);
+  //printf("swap in done\n");
+  spte->state = MEMORY;
+
+  return true;
+}
+
+/* Grow an user stack. This function is only called when
+   kernel detect page fault with STACK_HEURISTIC. It checks
+   how many pages would be needed for growing stack and
+   containing fault_addr into that stack. */
+bool
+stack_growth (uint8_t *fault_addr)
+{
+  ASSERT (fault_addr != NULL);
+
+  bool result;
+
+  uint8_t *ptr, *upage, *kpage;
+  int old_cnt, new_cnt;
+  
+  old_cnt = thread_current ()->growth_cnt;
+
+  /* calculate growth count. */
+  new_cnt = calculate_growth_count (PHYS_BASE, fault_addr);
+
+  /* Update its growth_cnt for later stack growth. */
+  thread_current ()->growth_cnt = new_cnt;
+
+  /* Impose the limit of stack size. */
+  if (new_cnt > MAX_PAGE_STACK)
+    return false;
+    
+  /* Allocate page and install mapping. */
+  for (int i = old_cnt + 1; i <= new_cnt; i++)
+  {
+    upage = PHYS_BASE - PGSIZE * i;
+    
+    struct spt_entry *new_entry = create_spte_from_stack (upage);
+    kpage = frame_alloc (PAL_USER | PAL_ZERO, new_entry);
+    result = install_page (upage, kpage, true);
+  }
+  if(result == false) printf("FALSE\n");
+  return result;
+}
+
+/* Calculate how many pages are needed for growing from start
+   to end. In our implementation, start will become PHYS_BASE
+   and end will becoma a fault_addr.*/
+int
+calculate_growth_count (uint8_t *start, uint8_t *end)
+{
+  int i;
+  uint8_t *temp = start;
+  
+  for (i = 0; temp > end; i++)
+  {
+    temp -= PGSIZE;
+  }
+
+  return i;
 }

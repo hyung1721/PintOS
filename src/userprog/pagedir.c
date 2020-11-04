@@ -44,6 +44,7 @@ pagedir_destroy (uint32_t *pd)
             palloc_free_page (pte_get_page (*pte));
         palloc_free_page (pt);
       }
+ 
   palloc_free_page (pd);
 }
 
@@ -63,25 +64,33 @@ lookup_page (uint32_t *pd, const void *vaddr, bool create)
   /* Shouldn't create new kernel virtual mappings. */
   ASSERT (!create || is_user_vaddr (vaddr));
 
+ 
   /* Check for a page table for VADDR.
      If one is missing, create one if requested. */
   pde = pd + pd_no (vaddr);
+  //printf("pd: %p vaddr : %p index: %x",pd,vaddr, pd_no (vaddr));
+
   if (*pde == 0) 
     {
+      
       if (create)
         {
           pt = palloc_get_page (PAL_ZERO);
           if (pt == NULL) 
             return NULL; 
-      
           *pde = pde_create (pt);
+         
         }
-      else
+      else{
+        
         return NULL;
+      }
+        
     }
-
+  
   /* Return the page table entry. */
   pt = pde_get_pt (*pde);
+  
   return &pt[pt_no (vaddr)];
 }
 
@@ -201,6 +210,7 @@ pagedir_is_accessed (uint32_t *pd, const void *vpage)
 void
 pagedir_set_accessed (uint32_t *pd, const void *vpage, bool accessed) 
 {
+  
   uint32_t *pte = lookup_page (pd, vpage, false);
   if (pte != NULL) 
     {

@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "synch.h"
+#include "hash.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -118,6 +119,9 @@ struct thread
     bool loaded;                        /* Boolean which represents success of load() function. */
 #endif
 
+   /* For project #3 */
+   struct hash spt;                     /* Supplemental page table entry*/
+   int growth_cnt;
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
@@ -145,7 +149,7 @@ tid_t thread_create (const char *name, int priority, thread_func *, void *);
 //                             void *aux);
 
 struct thread *get_thread_with_pid(tid_t pid);
-void thread_set_killed ();
+void thread_set_killed (void);
 
 void thread_block (void);
 void thread_unblock (struct thread *);

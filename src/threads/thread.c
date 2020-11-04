@@ -11,6 +11,8 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "vm/page.h"
+#include "vm/frame.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -276,6 +278,7 @@ thread_start (void)
   /* Create the idle thread. */
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
+  printf("Inside thread start %s %d\n",thread_current()->name,thread_current()->tid);
   thread_create ("idle", PRI_MIN, idle, &idle_started);
 
   /* Start preemptive thread scheduling. */
@@ -373,7 +376,8 @@ thread_create (const char *name, int priority,
      thread. If true, need to schedule again. */
   // if (thread_current ()->priority < t->priority)
   //   thread_yield ();
-  
+  // printf("Base Thread %s %d ,thread address %p\n",thread_current()->name,thread_current()->tid,thread_current());
+  // printf("Making Thread %s %d ,thread address %p\n",t->name,t->tid,t);
   return tid;
 }
 
@@ -688,6 +692,8 @@ init_thread (struct thread *t, const char *name, int priority)
     t->fd_table[i] = NULL;
 #endif
 
+  t->growth_cnt = 1;
+
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
@@ -762,6 +768,7 @@ thread_schedule_tail (struct thread *prev)
   if (prev != NULL && prev->status == THREAD_DYING && prev != initial_thread) 
     {
       ASSERT (prev != cur);
+      //printf("here?");
       palloc_free_page (prev);
     }
 }

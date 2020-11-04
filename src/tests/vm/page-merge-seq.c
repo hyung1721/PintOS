@@ -32,6 +32,7 @@ init (void)
   arc4_crypt (&arc4, buf1, sizeof buf1);
   for (i = 0; i < sizeof buf1; i++)
     histogram[buf1[i]]++;
+
 }
 
 /* Sort each chunk of buf1 using a subprocess. */
@@ -67,7 +68,7 @@ sort_chunks (void)
       quiet = false;
     }
 }
-
+int count = 0;
 /* Merge the sorted chunks in buf1 into a fully sorted buf2. */
 static void
 merge (void) 
@@ -82,26 +83,63 @@ merge (void)
   /* Initialize merge pointers. */
   mp_left = CHUNK_CNT;
   for (i = 0; i < CHUNK_CNT; i++)
+  {
     mp[i] = buf1 + CHUNK_SIZE * i;
-
+    // msg ("mp[%d] : %p\n",i,mp[i]);
+  }
   /* Merge. */
   op = buf2;
+  int count2 = 0 ;
   while (mp_left > 0) 
     {
+
+
       /* Find smallest value. */
       size_t min = 0;
       for (i = 1; i < mp_left; i++)
         if (*mp[i] < *mp[min])
           min = i;
 
+      // if(count % 1000 == 0){
+      //     printf("At count %d \n", count);
+      //     for(int j = 0 ; j < mp_left ; j++){
+      //         printf("%d  %d\n",j , *mp[j]);
+
+      //     }
+      //     printf("min is %d \n",min);
+      // }
+
+
       /* Append value to buf2. */
       *op++ = *mp[min];
 
+
+      // if(count % 1024== 0){
+      //     printf("At count %d ", count);
+      //      printf("op : %d vaddr : %p \n", *(op-1),op-1);
+       
+          
+      // }
+
+      //msg ("min: %d\n", min);
+
       /* Advance merge pointer.
          Delete this chunk from the set if it's emptied. */ 
-      if ((++mp[min] - buf1) % CHUNK_SIZE == 0)
+      if ((++mp[min] - buf1) % CHUNK_SIZE == 0){
+        //printf("count: %d\n",count2++);
         mp[min] = mp[--mp_left]; 
+      }
+        
+      
+      
+      count++;
     }
+
+    // for(int i = 0; i < 216*8 ; i++){
+
+    //   printf("vaddr : %p value : %d \n", buf2 + i*1024 , buf2[i*1024]);
+
+    // }
 }
 
 static void

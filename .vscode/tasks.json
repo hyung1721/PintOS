@@ -1,0 +1,136 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "shell",
+			"label": "make: build",
+			"command": "/usr/bin/make",
+			"args": [],
+			"options": {
+				"cwd": "${workspaceFolder}/src/${input:projectDirectory}"
+			},
+			"problemMatcher": "$gcc",
+			"group": "build"
+		},
+		{
+			"type": "shell",
+			"label": "make: clean",
+			"command": "/usr/bin/make",
+			"args": [
+				"clean"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/src/${input:projectDirectory}"
+			},
+			"problemMatcher": []
+		},
+		{
+			"type": "shell",
+			"label": "make: check",
+			"command": "/usr/bin/make",
+			"args": [
+				"check"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/src/${input:projectDirectory}"
+			},
+			"problemMatcher": "$gcc"
+		},
+		{
+			"type": "shell",
+			"label": "make: grade",
+			"command": "/usr/bin/make",
+			"args": [
+				"grade"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/src/${input:projectDirectory}"
+			},
+			"problemMatcher": "$gcc"
+		},
+		{
+			"type": "shell",
+			"label": "make: check single testcase",
+			"command": "/usr/bin/make",
+			"args": [
+				"build/tests/${input:testcasePath}.result"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/src/${input:projectDirectory}"
+			},
+			"dependsOn": [
+				"rm: remove single testcase result"
+			],
+			"problemMatcher": "$gcc"
+		},
+		{
+			"type": "shell",
+			"label": "make: check single testcase (GDB)",
+			"command": "/usr/bin/make",
+			"args": [
+				"build/tests/${input:testcasePath}.result"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/src/${input:projectDirectory}",
+				"env": {
+					"PINTOSOPTS": "--gdb -T 0"
+				}
+			},
+			"dependsOn": [
+				"rm: remove single testcase result"
+			],
+			"problemMatcher": "$gcc"
+		},
+		{
+			"type": "shell",
+			"label": "rm: remove single testcase result",
+			"command": "/bin/rm",
+			"args": [
+				"-f",
+				"build/tests/${input:testcasePath}.result",
+				"build/tests/${input:testcasePath}.output",
+				"build/tests/${input:testcasePath}.errors"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/src/${input:projectDirectory}"
+			},
+			"problemMatcher": []
+		},
+		{
+			"type": "shell",
+			"label": "killall: killall gdb program",
+			"command": "/bin/sh",
+			"args": [
+				"-c",
+				"'killall -9 gdb; exit 0'"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/src"
+			},
+			"presentation": {
+				"reveal": "silent"
+			},
+			"problemMatcher": []
+		}
+	],
+	"inputs": [
+		{
+			"type": "pickString",
+			"id": "projectDirectory",
+			"description": "Pick a project directory you want to build",
+			"options": [
+				"threads",
+				"userprog",
+				"vm",
+				"filesys"
+			],
+			"default": "threads"
+		},
+		{
+			"type": "promptString",
+			"id": "testcasePath",
+			"description": "Path to the testcase from 'tests' (e.g., threads/alarm-single)",
+			"default": "threads/alarm-single"
+		}
+	]
+}
