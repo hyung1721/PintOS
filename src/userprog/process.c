@@ -265,7 +265,7 @@ process_exit (void)
   
   free_frame_entry(cur);
   
-  destroy_spt(&cur->spt);
+  // destroy_spt(&cur->spt);
   pd = cur->pagedir;
   if (pd != NULL) 
     {
@@ -419,7 +419,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   for (i = 0; i < ehdr.e_phnum; i++) 
     {
       struct Elf32_Phdr phdr;
-      //printf("%dth iteration\n", i);
+
       if (file_ofs < 0 || file_ofs > file_length (file))
         goto done;
       file_seek (file, file_ofs);
@@ -473,7 +473,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
         }
     }
 
-  //printf("here?\n");
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
@@ -589,14 +588,12 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       
       if (kpage == NULL)
       {
-        //printf("here4\n");
         free (created_spte);
       }
 
       /* Load this page. */
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         { 
-          //printf("C\n");
           palloc_free_page (kpage);
           return false; 
         }
@@ -605,7 +602,6 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       /* Add the page to the process's address space. */
       if (!install_page (upage, kpage, writable)) 
         {
-          //printf("B\n");
           palloc_free_page (kpage);
           return false; 
         }
@@ -615,7 +611,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
     }
-  //printf("load segment end\n");
+
   return true;
 }
 
@@ -676,22 +672,16 @@ load_from_swap (struct spt_entry *spte)
   
   uint8_t *frame = frame_alloc (PAL_USER, spte);
   
-  //printf("frame %p\n", frame);
-  //printf("Frame allocate done\n");
   if (!frame)
       return false;
 
   if (!install_page (spte->upage, frame, spte->writable))
   {
-      //frame_free(frame);
       return false;
   }
   
-  //printf("install page done\n");
   spte->paddr = frame;
-  //printf("SWAP_IN - swap_index: %d upage: %p frame: %p\n",spte->swap_index, spte->upage,frame);
   swap_in (spte->swap_index, spte->paddr);
-  //printf("swap in done\n");
   spte->state = MEMORY;
 
   return true;
@@ -732,7 +722,7 @@ stack_growth (uint8_t *fault_addr)
     kpage = frame_alloc (PAL_USER | PAL_ZERO, new_entry);
     result = install_page (upage, kpage, true);
   }
-  if(result == false) printf("FALSE\n");
+  
   return result;
 }
 

@@ -12,7 +12,7 @@ extern struct bitmap *swap_table;
 void init_swap (void);
 void destroy_swap (void);
 extern block_sector_t swap_out (void *victim_frame);
-extern void swap_in (block_sector_t swap_index, void* frame);
-extern struct ft_entry* find_victim (void);
+extern void swap_in (block_sector_t swap_index, void *frame);
+extern struct ft_entry *find_victim (void);
 
 #endif

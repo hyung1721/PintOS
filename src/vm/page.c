@@ -46,14 +46,8 @@ init_spt (struct hash *spt)
 struct spt_entry *
 get_spte(uint8_t *upage)
 {
-    //struct spt_entry *temp = malloc (sizeof(struct spt_entry));
-    //struct spt_entry *result_spte;
-    //struct hash_elem *e;
-    //temp->upage = upage;
-    //printf("inside get size : %d\n", hash_size(&thread_current ()->spt));
     struct hash_iterator i;
-    uint8_t *target_upage = pg_round_down(upage);
-    //printf("target : %p\n", target_upage);
+    uint8_t *target_upage = pg_round_down (upage);
 
     hash_first (&i, &thread_current ()->spt);
     while (hash_next (&i))
@@ -61,22 +55,9 @@ get_spte(uint8_t *upage)
         struct spt_entry *entry = hash_entry (hash_cur (&i),
                                               struct spt_entry,
                                               elem);
-        //printf("upage : %p\n", entry->upage);
         if (entry->upage == target_upage)
             return entry;
     }
-
-    //printf("end\n");
-
-    // e = hash_find (&thread_current ()->spt, &temp->elem);
-    // printf("thread name : %s\n", thread_current ()->name);
-    // if(e == NULL) printf("HI\n");
-    // result_spte = hash_entry (e, struct spt_entry,
-    //                           elem);
-    // printf("result : %p\n", result_spte);
-    // free (temp);
-
-    // return result_spte;
 }
 
 struct spt_entry *
@@ -91,6 +72,7 @@ create_spte_from_stack (uint8_t *upage)
     spte->paddr = pagedir_get_page (thread_current ()->pagedir, upage);
     spte->state = EXEC_FILE;
     spte->writable = true;
+    spte->thread = thread_current();
     hash_insert (&thread_current ()->spt, &spte->elem);
 
     return spte;
@@ -108,20 +90,18 @@ update_spte (struct spt_entry *spte, enum status state, block_sector_t swap_inde
     switch (state)
     {
         case SWAP_DISK:
-            // printf("INSIDE UPDATE_SPTE current thread %d unmapping paddr: %p \n" ,thread_current ()->tid,spte->paddr);
             spte->paddr = NULL;
             spte->state = state;
             spte->swap_index = swap_index;
-            pagedir_clear_page (thread_current ()->pagedir,
+            pagedir_clear_page (spte->thread->pagedir,
                                 spte->upage);
-
             break;
     }
 }
 
 /* Free a supplemental page table entry. */
 void
-destroy_spte (struct hash_elem* e, void* aux)
+destroy_spte (struct hash_elem *e, void *aux)
 {
     free (hash_entry (e, struct spt_entry, elem));
 }
@@ -132,17 +112,17 @@ void
 destroy_spt (struct hash *spt)
 {
     struct hash_iterator i;
-
+    
     hash_first (&i, spt);
+
     while (hash_next (&i))
     {
         struct spt_entry *entry = hash_entry (hash_cur (&i),
                                               struct spt_entry,
                                               elem);
-        //if(entry->paddr == NULL) printf("ERROR\n");
-        
-        palloc_free_page(entry->paddr);
-        
+        pagedir_clear_page (entry->thread->pagedir,
+                            entry->upage);
+        palloc_free_page (entry->paddr);
     }
 
     hash_destroy (spt, destroy_spte);
@@ -156,9 +136,8 @@ create_spte_from_exec (struct file *file, int32_t ofs,
                        uint8_t *upage, uint32_t read_bytes,
                        uint32_t zero_bytes, bool writable)
 {
-
-    // printf("INSIDE CREATE_SPTE_FROM EXEC current thread %d\n" ,thread_current ()->tid);
     struct spt_entry *spte = malloc (sizeof (struct spt_entry));
+
     if (!spte)
         return false;
 
@@ -166,6 +145,7 @@ create_spte_from_exec (struct file *file, int32_t ofs,
     spte->paddr = pagedir_get_page (thread_current ()->pagedir, upage);
     spte->state = EXEC_FILE;
     spte->writable = writable;
+    spte->thread = thread_current();
     spte->file = file;
     spte->offset = ofs;
     spte->read_bytes = read_bytes;

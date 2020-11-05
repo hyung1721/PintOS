@@ -278,7 +278,6 @@ thread_start (void)
   /* Create the idle thread. */
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
-  printf("Inside thread start %s %d\n",thread_current()->name,thread_current()->tid);
   thread_create ("idle", PRI_MIN, idle, &idle_started);
 
   /* Start preemptive thread scheduling. */
@@ -768,7 +767,6 @@ thread_schedule_tail (struct thread *prev)
   if (prev != NULL && prev->status == THREAD_DYING && prev != initial_thread) 
     {
       ASSERT (prev != cur);
-      //printf("here?");
       palloc_free_page (prev);
     }
 }

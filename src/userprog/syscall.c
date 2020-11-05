@@ -13,7 +13,7 @@
 #include "userprog/process.h"
 #include "devices/shutdown.h"
 #include "devices/input.h"
-
+#include "threads/synch.h"
 typedef int pid_t;
 static void syscall_handler (struct intr_frame *);
 /* For Project #2. USER PROGRAM */
@@ -40,9 +40,12 @@ void syscall_close (int);
 
 void check_child_before_exit(struct thread *);
 
+struct lock syscall_lock;
+
 void
 syscall_init (void) 
 {
+  lock_init (&syscall_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -243,7 +246,10 @@ syscall_wait (pid_t pid)
 bool
 syscall_create (const char *filename, unsigned initial_size)
 {
-  return filesys_create (filename, initial_size);
+  lock_acquire (&syscall_lock);
+  bool result = filesys_create (filename, initial_size);
+  lock_release (&syscall_lock);
+  return result;
 }
 
 /* System call handler function for remove() system call. 
@@ -252,7 +258,10 @@ syscall_create (const char *filename, unsigned initial_size)
 bool
 syscall_remove (const char *filename)
 {
-  return filesys_remove (filename);
+  lock_acquire (&syscall_lock);
+  bool result = filesys_remove (filename);
+  lock_release (&syscall_lock);
+  return result;
 }
 
 /* System call handler function for open() system call. 
@@ -261,9 +270,13 @@ syscall_remove (const char *filename)
 int
 syscall_open(const char* filename)
 {
+  lock_acquire(&syscall_lock);
   /* Missing filename must be avoided. */
-  if (!strcmp (filename, ""))
-    return -1;
+  if (!strcmp (filename, "")){
+     lock_release(&syscall_lock);
+     return -1;
+  }
+    
 
   struct thread *current_thread = thread_current ();
   struct file **fd_table = current_thread->fd_table;
@@ -272,11 +285,13 @@ syscall_open(const char* filename)
   int new_fd = -1, i = 0;
   
   opened_file = filesys_open (filename);
-
+  
   /* If filesys_open() fails, return -1. */
-  if (opened_file == NULL)
+  if (opened_file == NULL){
+    lock_release (&syscall_lock);
     return -1;
-
+  }
+ 
   /* Need to implement generally in process_execute() */
   token = strtok_r (current_thread->name, " ", &save_ptr);
 
@@ -294,10 +309,11 @@ syscall_open(const char* filename)
       break;
     } 
   }
-  
+
   if (i == FD_MAX_SIZE)
     file_close (opened_file);
 
+  lock_release(&syscall_lock);
   return new_fd;
 }
 
@@ -307,15 +323,24 @@ syscall_open(const char* filename)
 int
 syscall_filesize (int fd)
 {
+  lock_acquire (&syscall_lock);
   struct thread *current_thread = thread_current ();
   struct file **fd_table = current_thread->fd_table ; 
  
   /* Check the validity of the fd. */
   if (fd < 2 || fd >= FD_MAX_SIZE)
+  {
+    lock_release (&syscall_lock);
     syscall_exit (-1);
+  }
+    
   if (fd_table[fd] == NULL)
+  {
+    lock_release (&syscall_lock);
     syscall_exit (-1);
+  }
 
+  lock_release (&syscall_lock);
   return (int)file_length (fd_table[fd]);
 }
 
@@ -325,7 +350,7 @@ syscall_filesize (int fd)
 int
 syscall_read (int fd, void *buffer, unsigned size)
 {
-
+  lock_acquire (&syscall_lock);
   struct thread *current_thread = thread_current ();
   struct file **fd_table = current_thread->fd_table;
 
@@ -340,15 +365,23 @@ syscall_read (int fd, void *buffer, unsigned size)
       *(char*)buffer = c;
       buffer++;
     }
+    lock_release (&syscall_lock);
     return size;
   }
   
   /* Check the validity of the fd. */
   if (fd < 0 || fd == 1 || fd >= FD_MAX_SIZE)
+  {
+    lock_release (&syscall_lock);
     syscall_exit (-1);
+  }
   else if (fd_table[fd] == NULL)
+  {
+    lock_release (&syscall_lock);
     syscall_exit (-1);
+  }
 
+  lock_release (&syscall_lock);
   return file_read (fd_table[fd], buffer, size) ;
 }
 /* System call handler function for wrtie() system call. 
@@ -357,6 +390,7 @@ syscall_read (int fd, void *buffer, unsigned size)
 int
 syscall_write (int fd, const void *buffer, unsigned size)
 {
+  lock_acquire (&syscall_lock);
   struct thread *current_thread = thread_current ();
   struct file **fd_table = current_thread->fd_table;
 
@@ -364,19 +398,29 @@ syscall_write (int fd, const void *buffer, unsigned size)
   if (fd == 1)
   {
     putbuf (buffer, size);
+    lock_release (&syscall_lock);
     return size;
   }
   
   /* Check the validity of the fd. */
   if (fd < 1 || fd >= FD_MAX_SIZE)
+  {
+    lock_release (&syscall_lock);
     syscall_exit (-1); 
+  }
   else if (fd_table[fd] == NULL)
+  {
+    lock_release (&syscall_lock);
     syscall_exit (-1);
-
+  }
   /* Check if this file is writable. */
   if (get_deny_write (fd_table[fd]))
+  {
+    lock_release (&syscall_lock);
     return 0;
-  
+  }
+
+  lock_release (&syscall_lock);
   return file_write (fd_table[fd], buffer,size);
 }
 
@@ -387,15 +431,23 @@ syscall_write (int fd, const void *buffer, unsigned size)
 void
 syscall_seek (int fd, unsigned position)
 {
+  lock_acquire (&syscall_lock);
   struct thread *current_thread = thread_current ();
   struct file **fd_table = current_thread->fd_table ; 
 
   /* Check the validity of the fd. */
   if (fd < 2 || fd >= FD_MAX_SIZE)
+  {
+    lock_release (&syscall_lock);
     syscall_exit (-1);
+  }
   if (fd_table[fd] == NULL)
+  {
+    lock_release (&syscall_lock);
     syscall_exit (-1);
-  
+  }
+
+  lock_release (&syscall_lock);
   file_seek (fd_table[fd], position);
 }
 
@@ -406,15 +458,23 @@ syscall_seek (int fd, unsigned position)
 unsigned
 syscall_tell (int fd)
 {
+  lock_acquire (&syscall_lock); 
   struct thread *current_thread = thread_current ();
   struct file **fd_table = current_thread->fd_table ; 
 
   /* Check the validity of the fd. */
   if (fd < 2 || fd >= FD_MAX_SIZE)
+  {
+    lock_release (&syscall_lock);
     syscall_exit (-1);
+  }
   if (fd_table[fd] == NULL)
+  {
+    lock_release (&syscall_lock);
     syscall_exit (-1);
+  }  
 
+  lock_release (&syscall_lock);
   return (unsigned)file_tell (fd_table[fd]);
 }
 /* System call handler function for close() system call. 
@@ -423,18 +483,28 @@ syscall_tell (int fd)
 void
 syscall_close (int fd)
 {
+  lock_acquire(&syscall_lock);
   struct thread *current_thread = thread_current ();
   struct file **fd_table = current_thread->fd_table;
 
   /* Check the validity of the fd. */
-  if (fd < 2 || fd >= FD_MAX_SIZE)
+  if (fd < 2 || fd >= FD_MAX_SIZE){
+    lock_release(&syscall_lock);
     syscall_exit (-1);
-  if (fd_table[fd] == NULL)
+  
+  }
+  
+  if (fd_table[fd] == NULL){
+    lock_release(&syscall_lock);
     syscall_exit (-1);
+  }
+ 
 
   /* After closing fd, fd_table must be updated. */
   file_close(fd_table[fd]);
   fd_table[fd] = NULL;
+
+  lock_release(&syscall_lock);
 }
 
 /* Check if there are children which does not exit yet.
