@@ -87,6 +87,10 @@ find_victim (void)
            a vitime frame. */
         if (!pagedir_is_accessed (entry->t->pagedir, entry->spte->upage))
         {
+            entry->spte->state = SWAP_DISK;
+            pagedir_clear_page (entry->spte->thread->pagedir,
+                                entry->spte->upage);
+
             return list_entry (evict_elem, struct ft_entry, elem); 
         }
         else

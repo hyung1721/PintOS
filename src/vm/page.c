@@ -91,10 +91,10 @@ update_spte (struct spt_entry *spte, enum status state, block_sector_t swap_inde
     {
         case SWAP_DISK:
             spte->paddr = NULL;
-            spte->state = state;
+            // spte->state = state;
             spte->swap_index = swap_index;
-            pagedir_clear_page (spte->thread->pagedir,
-                                spte->upage);
+            // pagedir_clear_page (spte->thread->pagedir,
+            //                     spte->upage);
             break;
     }
 }
@@ -113,17 +113,17 @@ destroy_spt (struct hash *spt)
 {
     struct hash_iterator i;
     
-    hash_first (&i, spt);
+    // hash_first (&i, spt);
 
-    while (hash_next (&i))
-    {
-        struct spt_entry *entry = hash_entry (hash_cur (&i),
-                                              struct spt_entry,
-                                              elem);
-        pagedir_clear_page (entry->thread->pagedir,
-                            entry->upage);
-        palloc_free_page (entry->paddr);
-    }
+    // while (hash_next (&i))
+    // {
+    //     struct spt_entry *entry = hash_entry (hash_cur (&i),
+    //                                           struct spt_entry,
+    //                                           elem);
+    //     pagedir_clear_page (entry->thread->pagedir,
+    //                         entry->upage);
+    //     palloc_free_page (entry->paddr);
+    // }
 
     hash_destroy (spt, destroy_spte);
 }

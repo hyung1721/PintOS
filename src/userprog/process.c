@@ -265,7 +265,7 @@ process_exit (void)
   
   free_frame_entry(cur);
   
-  // destroy_spt(&cur->spt);
+  destroy_spt(&cur->spt);
   pd = cur->pagedir;
   if (pd != NULL) 
     {
