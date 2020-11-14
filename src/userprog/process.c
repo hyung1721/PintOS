@@ -32,6 +32,12 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 /* Prototype declaration */
 void push_arguments(int argc, char **argv, void **esp);
 
+/* Own functions for project #3-1 */
+
+/* Prototype declaration */
+bool stack_growth (uint8_t *fault_addr);
+int calculate_growth_count (uint8_t *start, uint8_t *end);
+
 /* Function definition */
 
 /* Push arguments specified by argc and argv into stack, which is 
@@ -698,7 +704,7 @@ stack_growth (uint8_t *fault_addr)
 
   bool result;
 
-  uint8_t *ptr, *upage, *kpage;
+  uint8_t *upage, *kpage;
   int old_cnt, new_cnt;
   
   old_cnt = thread_current ()->growth_cnt;

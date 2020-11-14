@@ -24,7 +24,7 @@ spt_hash_less_func (struct hash_elem *a,
     struct spt_entry *spte_a = hash_entry (a, struct spt_entry, elem);
     struct spt_entry *spte_b = hash_entry (b, struct spt_entry, elem);
 
-    if (spte_a->upage < spte_b)
+    if (spte_a->upage < spte_b->upage)
         result = true;
     else
         result = false;
@@ -111,7 +111,7 @@ destroy_spte (struct hash_elem *e, void *aux)
 void
 destroy_spt (struct hash *spt)
 {
-    struct hash_iterator i;
+    // struct hash_iterator i;
     
     // hash_first (&i, spt);
 
