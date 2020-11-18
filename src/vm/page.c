@@ -69,8 +69,8 @@ create_spte_from_stack (uint8_t *upage)
         return false;
 
     spte->upage = upage;
-    spte->paddr = pagedir_get_page (thread_current ()->pagedir, upage);
-    spte->state = EXEC_FILE;
+    spte->paddr = NULL;
+    spte->state = MEMORY; //****
     spte->writable = true;
     spte->thread = thread_current();
     hash_insert (&thread_current ()->spt, &spte->elem);
@@ -120,9 +120,13 @@ destroy_spt (struct hash *spt)
     //     struct spt_entry *entry = hash_entry (hash_cur (&i),
     //                                           struct spt_entry,
     //                                           elem);
-    //     pagedir_clear_page (entry->thread->pagedir,
+    //     if(entry->state = MEMORY){
+
+    //         palloc_free_page (entry->paddr);
+    //         pagedir_clear_page (entry->thread->pagedir,
     //                         entry->upage);
-    //     palloc_free_page (entry->paddr);
+    //     }
+       
     // }
 
     hash_destroy (spt, destroy_spte);
@@ -142,12 +146,36 @@ create_spte_from_exec (struct file *file, int32_t ofs,
         return false;
 
     spte->upage = upage;
-    spte->paddr = pagedir_get_page (thread_current ()->pagedir, upage);
+    spte->paddr = NULL;
     spte->state = EXEC_FILE;
     spte->writable = writable;
     spte->thread = thread_current();
     spte->file = file;
     spte->offset = ofs;
+    spte->read_bytes = read_bytes;
+    spte->zero_bytes = zero_bytes;
+    hash_insert (&thread_current ()->spt, &spte->elem);
+
+    return spte;
+}
+
+struct spt_entry *
+create_spte_from_mmap(struct file *file, int32_t offset,
+                       uint8_t *addr, uint32_t read_bytes,
+                       uint32_t zero_bytes, bool writable)
+{
+    struct spt_entry *spte = malloc (sizeof (struct spt_entry));
+
+    if (!spte)
+        return false;
+
+    spte->upage = addr;
+    spte->paddr = NULL;
+    spte->state = MMAP;
+    spte->writable = writable;
+    spte->thread = thread_current();
+    spte->file = file;
+    spte->offset = offset;
     spte->read_bytes = read_bytes;
     spte->zero_bytes = zero_bytes;
     hash_insert (&thread_current ()->spt, &spte->elem);

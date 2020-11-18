@@ -14,6 +14,10 @@
 #include "devices/shutdown.h"
 #include "devices/input.h"
 #include "threads/synch.h"
+#include "vm/swap.h"
+#include "vm/page.h"
+#include "hash.h"
+#include "lib/round.h"
 typedef int pid_t;
 static void syscall_handler (struct intr_frame *);
 /* For Project #2. USER PROGRAM */
@@ -37,6 +41,8 @@ int syscall_write (int, const void *, unsigned);
 void syscall_seek (int, unsigned);
 unsigned syscall_tell (int);
 void syscall_close (int);
+mapid_t syscall_mmap (int, void *);
+void syscall_munmap (mapid_t);
 
 void check_child_before_exit(struct thread *);
 
@@ -132,6 +138,13 @@ syscall_handler (struct intr_frame *f)
       case SYS_CLOSE:
         syscall_close (*(int *)(f->esp + 4));
         break;
+      case SYS_MMAP:
+      //이 경우만 특별히
+        f->eax = syscall_mmap (*(int *)(f->esp + 4), *(const void **)(f->esp + 8));
+        break;
+      case SYS_MUNMAP:
+        syscall_munmap (*(mapid_t *)(f->esp + 4));
+        break;
       default:
         printf ("SYSCALL NUM %d is not yet implemented!\n", syscall_num);
         break;
@@ -141,6 +154,9 @@ syscall_handler (struct intr_frame *f)
 void
 check_invalid_pointer(uint32_t *pd, const void *ptr)
 {
+  
+  if(get_spte(ptr)) return;
+
   if (ptr == NULL
       || is_kernel_vaddr (ptr)
       || pagedir_get_page (pd, ptr) == NULL)
@@ -180,6 +196,12 @@ syscall_exit (int status)
   {
     if (fd_table[i] != NULL)
       syscall_close(i);
+  }
+
+  for (int i = 2; i < FD_MAX_SIZE; i++)
+  {
+    if (cur->mmap_table[i] != NULL)
+      syscall_munmap(i);
   }
 
   check_child_before_exit(cur);
@@ -291,7 +313,7 @@ syscall_open(const char* filename)
     lock_release (&syscall_lock);
     return -1;
   }
- 
+
   /* Need to implement generally in process_execute() */
   token = strtok_r (current_thread->name, " ", &save_ptr);
 
@@ -356,7 +378,7 @@ syscall_read (int fd, void *buffer, unsigned size)
 
   /* For STDIN */
   if (fd == 0)
-  {
+  { 
     for(int i = 0 ; i < size ; i++)
     {
       char c; 
@@ -498,14 +520,139 @@ syscall_close (int fd)
     lock_release(&syscall_lock);
     syscall_exit (-1);
   }
- 
-
   /* After closing fd, fd_table must be updated. */
+
   file_close(fd_table[fd]);
+
   fd_table[fd] = NULL;
+  
 
   lock_release(&syscall_lock);
 }
+
+/* System call handler function for mmap() system call.
+
+   Maps the file open as fd into the process's virtual 
+   address space. */
+mapid_t
+syscall_mmap (int fd, void *addr)
+{
+  lock_acquire (&syscall_lock);
+  
+  struct thread *cur = thread_current ();
+  struct file *file = cur->fd_table[fd];
+  off_t file_len;
+
+  lock_release (&syscall_lock);
+
+  if(file == NULL
+     || pg_ofs (addr) != 0
+     || (file_len = file_length (file)) == 0
+     || addr == (void*)0
+     || is_kernel_vaddr (addr) 
+     || fd == 0
+     || fd == 1)
+     return -1;
+
+  uint32_t read_bytes, zero_bytes;
+  read_bytes = file_len;
+  zero_bytes = (ROUND_UP (file_len, PGSIZE) - read_bytes);
+  off_t offset = 0;
+
+  /* Because file would be closed after mmap(), we use file_reopen()
+     to access file data further accessing. This new_file will be
+     used to create supplemental page table entry for addr. */
+  struct file* new_file = file_reopen(file);
+  
+  while (read_bytes > 0 || zero_bytes > 0) 
+    {
+      /* Detect overlapping with other segment. */
+      if (get_spte(addr) != NULL)
+        return -1;
+      
+      /* Calculate how to fill this page.
+         We will read PAGE_READ_BYTES bytes from FILE
+         and zero the final PAGE_ZERO_BYTES bytes. */
+      size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+      size_t page_zero_bytes = PGSIZE - page_read_bytes;
+     
+      struct spt_entry *created_spte;
+      created_spte = create_spte_from_mmap (new_file, offset, addr, 
+                                            page_read_bytes, 
+                                            page_zero_bytes, true);
+      
+      if (created_spte == NULL)
+         return false;
+      
+      /* Advance. */
+      offset += PGSIZE;
+      read_bytes -= page_read_bytes;
+      zero_bytes -= page_zero_bytes;
+      addr += PGSIZE;
+    }
+
+  cur->mmap_table[fd] = new_file;
+  return fd;
+}
+
+/* System call handler function for munmap() system call. 
+
+   Unmaps the mapping designated by mapping. */
+void
+syscall_munmap (mapid_t mapping)
+{
+  struct thread *cur = thread_current ();
+  int fd = mapping;
+  struct file* file = cur->mmap_table[fd];
+ 
+  /* Unmmaping unmapped mapping will be denied. */
+  if(cur->mmap_table[fd] == NULL)
+    syscall_exit (-1);
+
+  struct hash spt = cur->spt;
+  struct hash_iterator i;
+  
+  hash_first (&i, &spt);
+
+  while (hash_next (&i))
+  {
+      struct spt_entry *entry = hash_entry (hash_cur (&i),
+                                            struct spt_entry,
+                                            elem);
+      if(entry->file == file)
+      {       
+        if(entry->state == MEMORY 
+           && pagedir_is_dirty (cur->pagedir,entry->upage))
+        {
+          lock_acquire (&filesys_lock);
+          file_write_at (entry->file, entry->paddr,
+                         entry->read_bytes,
+                         entry->offset);
+          lock_release (&filesys_lock);
+        }
+        else if(entry->state == SWAP_DISK 
+                && pagedir_is_dirty (cur->pagedir,entry->upage))
+        {
+          int swap_index = entry->swap_index;
+
+          uint8_t* temp_buffer = (uint8_t *)malloc (sizeof(uint8_t)*PGSIZE);
+          swap_in (swap_index,temp_buffer);
+
+          lock_acquire (&filesys_lock);
+          file_write_at (entry->file, temp_buffer, 
+                         entry->read_bytes, 
+                         entry->offset);
+          lock_release (&filesys_lock);
+          
+          free (temp_buffer);
+        }
+
+        cur->mmap_table[fd] = NULL;
+        hash_delete (&cur->spt, &entry->elem);
+      }
+  }
+  file_close(file);
+} 
 
 /* Check if there are children which does not exit yet.
    And do sema_up(&delete_sema) for those child because 

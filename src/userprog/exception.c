@@ -161,18 +161,33 @@ page_fault (struct intr_frame *f)
 
    bool load = false;
 
+ 
+
    if (not_present && fault_addr >= USER_VADDR_BOTTOM && is_user_vaddr (fault_addr))
    {
       struct spt_entry *spte = get_spte (fault_addr);
-      
+      //printf("fault add : %p",fault_addr);
+      //if(spte->upage == (void*)0x804d000)
+         //printf("%d\n", *(uint8_t*)(pagedir_get_page(thread_current()->pagedir,(uint8_t*)0x0804d880)));
       if (spte)
       {
-         // if (spte->state == EXEC_FILE)
-         //    load = load_from_exec(spte);
-         
+         if (spte->state == EXEC_FILE){
+            
+            load = load_from_exec(spte);
+            //printf("thread : %d uaddr : %p paddr: %p\n",spte->thread->tid,spte->upage,spte->paddr);
+            
+         }
+      
          if (spte->state == SWAP_DISK)
          {  
+            
             load = load_from_swap (spte);
+         }
+
+         if (spte->state == MMAP)
+         {
+         
+            load = load_from_mmap(spte);
          }
       }
       else if (fault_addr >= f->esp - STACK_HEURISTIC)

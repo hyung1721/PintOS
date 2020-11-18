@@ -43,14 +43,14 @@ frame_alloc (enum palloc_flags flags, struct spt_entry *spte)
     {
         lock_acquire (&frame_table_lock);
        
-        struct ft_entry *fte = find_victim ();
+        struct ft_entry *victim_fte = find_victim ();
 
-        frame = fte->frame;
+        frame = victim_fte->frame;
         block_sector_t swap_index = swap_out (frame);
         
-        update_spte (fte->spte, SWAP_DISK, swap_index);
+        update_spte (victim_fte->spte, SWAP_DISK, swap_index);
      
-        remove_ft_entry (fte);
+        remove_ft_entry (victim_fte);
         
         lock_release (&frame_table_lock);
 
@@ -61,7 +61,6 @@ frame_alloc (enum palloc_flags flags, struct spt_entry *spte)
     else{
         create_fte (frame, spte);
     }
-
     return frame;
 }
 

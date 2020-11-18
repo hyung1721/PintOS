@@ -10,7 +10,8 @@
 enum status {
     SWAP_DISK,                    /* Frame is in swap disk. */
     MEMORY,                       /* Frame is in physical memory. */
-    EXEC_FILE                     /* Frame is executable file. */
+    EXEC_FILE,                     /* Frame is executable file. */
+    MMAP                          
 };
 
 struct spt_entry {
@@ -42,6 +43,11 @@ struct spt_entry *create_spte_from_exec (struct file *file, int32_t ofs,
                                          uint8_t *upage, uint32_t read_bytes,
                                          uint32_t zero_bytes,
                                         bool writable);
+
+struct spt_entry * create_spte_from_mmap(struct file *file, int32_t offset,
+                       uint8_t *addr, uint32_t read_bytes,
+                       uint32_t zero_bytes, bool writable);
+void destroy_spte (struct hash_elem *e, void *aux);
 void destroy_spt (struct hash *spt);
 
 #endif

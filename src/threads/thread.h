@@ -122,6 +122,10 @@ struct thread
    /* For project #3 */
    struct hash spt;                     /* Supplemental page table entry*/
    int growth_cnt;
+
+   struct file *executable_file;        /* File pointer to process's executable file. */
+   struct file *mmap_table[FD_MAX_SIZE];/* Array of memory mapped file pointer. */
+
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };

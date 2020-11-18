@@ -265,12 +265,11 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
-
+  
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
-  
   free_frame_entry(cur);
-  
+  file_close(cur->executable_file);
   destroy_spt(&cur->spt);
   pd = cur->pagedir;
   if (pd != NULL) 
@@ -401,6 +400,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   /* Open executable file. */
   file = filesys_open (file_name);
+  t->executable_file = file;
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
@@ -490,7 +490,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+  //file_close (file);
   return success;
 }
 
@@ -567,8 +567,62 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT (ofs % PGSIZE == 0);
   struct spt_entry *created_spte;
 
+  off_t offset = ofs;
   //printf("load segment begin with writable : %d upage : %p\n", writable, upage);
   file_seek (file, ofs);
+
+// while (read_bytes > 0 || zero_bytes > 0) 
+//     {
+      
+//       /* Calculate how to fill this page.
+//          We will read PAGE_READ_BYTES bytes from FILE
+//          and zero the final PAGE_ZERO_BYTES bytes. */
+//       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+//       size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+//       //printf("page read bytes : %d\n", page_read_bytes);
+      
+
+//       created_spte = create_spte_from_exec(file, ofs, upage, 
+//                                             page_read_bytes, page_zero_bytes, writable);
+      
+//       if (created_spte == NULL)
+//          return false;
+      
+      
+//       /* Get a page of memory. */
+//       uint8_t *kpage = frame_alloc (PAL_USER, created_spte);
+//       //printf("upage : %p kpage: %p | ", upage, kpage);
+      
+//       if (kpage == NULL)
+//       {
+//         free (created_spte);
+//       }
+
+//       /* Load this page. */
+//       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
+//         { 
+//           palloc_free_page (kpage);
+//           return false; 
+//         }
+//       memset (kpage + page_read_bytes, 0, page_zero_bytes);
+
+//       /* Add the page to the process's address space. */
+//       if (!install_page (upage, kpage, writable)) 
+//         {
+//           palloc_free_page (kpage);
+//           return false; 
+//         }
+//       //printf("Thread %d : upage %p mapped to frame %p r : %d , z : %d\n",thread_current()->tid,upage,kpage,page_read_bytes,page_zero_bytes);
+
+//       /* Advance. */
+//       read_bytes -= page_read_bytes;
+//       zero_bytes -= page_zero_bytes;
+//       upage += PGSIZE;
+//     }
+
+  /* For each page of segment, we just create new supplemental page
+     table entry for lazy loading. */
   while (read_bytes > 0 || zero_bytes > 0) 
     {
       
@@ -577,42 +631,17 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
          and zero the final PAGE_ZERO_BYTES bytes. */
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
-
-      //printf("page read bytes : %d\n", page_read_bytes);
       
-
-      created_spte = create_spte_from_exec(file, ofs, upage, 
-                                            page_read_bytes, page_zero_bytes, writable);
-      
+      created_spte = create_spte_from_exec(file, offset, upage, 
+                                           page_read_bytes,
+                                           page_zero_bytes,
+                                           writable);
+    
       if (created_spte == NULL)
          return false;
-      
-      
-      /* Get a page of memory. */
-      uint8_t *kpage = frame_alloc (PAL_USER, created_spte);
-      //printf("upage : %p kpage: %p | ", upage, kpage);
-      
-      if (kpage == NULL)
-      {
-        free (created_spte);
-      }
-
-      /* Load this page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-        { 
-          palloc_free_page (kpage);
-          return false; 
-        }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
-
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable)) 
-        {
-          palloc_free_page (kpage);
-          return false; 
-        }
 
       /* Advance. */
+      offset += PGSIZE;
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
@@ -640,10 +669,12 @@ setup_stack (void **esp)
       if (success)
       {
         *esp = PHYS_BASE;
+        new_entry->paddr = kpage;
       }
       else
         palloc_free_page (kpage);
     }
+
   return success;
 }
 
@@ -683,12 +714,95 @@ load_from_swap (struct spt_entry *spte)
 
   if (!install_page (spte->upage, frame, spte->writable))
   {
+      palloc_free_page (frame);
       return false;
   }
   
   spte->paddr = frame;
   swap_in (spte->swap_index, spte->paddr);
   spte->state = MEMORY;
+
+  return true;
+}
+
+/* Load executable file when lazy loading. By using information
+   about the executable file stored in supplemental page table
+   entry, this function loads appropriate content of executable
+   file and installs the mapping. */
+bool
+load_from_exec (struct spt_entry *spte)
+{    
+  uint8_t *frame = frame_alloc(PAL_USER, spte);
+  
+  if (frame == NULL)
+    return false;
+  
+  memset(frame, 0, 4096);
+
+  if (spte->read_bytes > 0)
+  {  
+    lock_acquire (&filesys_lock);
+
+    if (file_read_at (spte->file, frame, spte->read_bytes, spte->offset)
+        != (int)spte->read_bytes)
+    {  
+      lock_release (&filesys_lock);
+      palloc_free_page (frame);
+      return false;
+    }
+    
+    lock_release (&filesys_lock);
+    memset (frame + spte->read_bytes, 0, spte->zero_bytes);
+  }
+
+  if (!install_page (spte->upage, frame, spte->writable))
+  {
+    palloc_free_page (frame);
+    return false;
+  }
+
+  spte->state = MEMORY;
+  spte->paddr = frame;
+
+  return true;
+}
+
+
+bool
+load_from_mmap (struct spt_entry *spte)
+{ 
+  struct thread *cur = thread_current();
+  uint8_t *frame = frame_alloc(PAL_USER, spte);
+    
+  if (frame == NULL)
+    return false;
+  
+  memset(frame, 0, 4096);
+
+  if (spte->read_bytes > 0)
+  {  
+    lock_acquire (&filesys_lock);
+
+    if (file_read_at (spte->file, frame, spte->read_bytes, spte->offset) 
+        != (int)spte->read_bytes)
+    {  
+      lock_release (&filesys_lock);
+      palloc_free_page (frame);
+      return false;
+    }
+
+    lock_release (&filesys_lock);
+    memset (frame + spte->read_bytes, 0, spte->zero_bytes);
+  }
+
+  if (!install_page (spte->upage, frame, spte->writable))
+  {
+    palloc_free_page (frame);
+    return false;
+  }
+
+  spte->state = MEMORY;
+  spte->paddr = frame;
 
   return true;
 }

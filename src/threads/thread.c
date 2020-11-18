@@ -673,7 +673,6 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
-
   // /* Initialization of data structure for project 1 */
   // list_init(&t->donation_threads);
   // t->old_priority = priority;
@@ -690,7 +689,8 @@ init_thread (struct thread *t, const char *name, int priority)
   for(int i = 0 ; i < FD_MAX_SIZE ; i++)
     t->fd_table[i] = NULL;
 #endif
-
+  for(int i = 0 ; i < FD_MAX_SIZE ; i++)
+    t->mmap_table[i] = NULL;
   t->growth_cnt = 1;
 
   old_level = intr_disable ();
