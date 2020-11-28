@@ -165,28 +165,20 @@ page_fault (struct intr_frame *f)
 
    if (not_present && fault_addr >= USER_VADDR_BOTTOM && is_user_vaddr (fault_addr))
    {
+     
       struct spt_entry *spte = get_spte (fault_addr);
-      //printf("fault add : %p",fault_addr);
-      //if(spte->upage == (void*)0x804d000)
-         //printf("%d\n", *(uint8_t*)(pagedir_get_page(thread_current()->pagedir,(uint8_t*)0x0804d880)));
       if (spte)
       {
-         if (spte->state == EXEC_FILE){
-            
+         if (spte->state == EXEC_FILE)
+         {
             load = load_from_exec(spte);
-            //printf("thread : %d uaddr : %p paddr: %p\n",spte->thread->tid,spte->upage,spte->paddr);
-            
          }
-      
          if (spte->state == SWAP_DISK)
          {  
-            
             load = load_from_swap (spte);
          }
-
          if (spte->state == MMAP)
          {
-         
             load = load_from_mmap(spte);
          }
       }
@@ -203,7 +195,6 @@ page_fault (struct intr_frame *f)
 //             not_present ? "not present" : "rights violation",
 //             write ? "writing" : "reading",
 //             user ? "user" : "kernel");
-//    printf("fault addr : %p esp : %p\n", fault_addr,f->esp);/
       syscall_exit (-1);
    } 
 }

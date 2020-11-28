@@ -16,6 +16,7 @@
 #include "threads/synch.h"
 #include "vm/swap.h"
 #include "vm/page.h"
+#include "vm/frame.h"
 #include "hash.h"
 #include "lib/round.h"
 typedef int pid_t;
@@ -75,7 +76,7 @@ syscall_handler (struct intr_frame *f)
   /* If the system call function have a return value, by setting f->eax
      which is %eax register for return value, syscall_handler passes the
      return value to the kernel. */
-
+  
   switch (syscall_num)
     {
       case SYS_HALT:
@@ -149,6 +150,8 @@ syscall_handler (struct intr_frame *f)
         printf ("SYSCALL NUM %d is not yet implemented!\n", syscall_num);
         break;
     }
+
+    
 }
 
 void
@@ -178,6 +181,7 @@ syscall_halt (void)
 void
 syscall_exit (int status)
 {
+  //printf("exit start\n");
   char thread_name[128];
   char *token, *save_ptr;
   struct thread *cur = thread_current ();
@@ -201,14 +205,16 @@ syscall_exit (int status)
   for (int i = 2; i < FD_MAX_SIZE; i++)
   {
     if (cur->mmap_table[i] != NULL)
-      syscall_munmap(i);
+      syscall_munmap (i);
   }
 
   check_child_before_exit(cur);
 
   /* Process termination message with status. */
   printf ("%s: exit(%d)\n", token, status);
+
   thread_exit ();
+ 
 }
 
 /* System call handler function for exec() system call. 
@@ -221,12 +227,18 @@ syscall_exit (int status)
 pid_t
 syscall_exec (const char *cmd_line)
 {
+  lock_acquire(&syscall_lock);
+  //printf("Lock acquire %d exec\n",thread_current ()->tid);
   /* Passing cmd_line, create a new process. */
   pid_t pid = process_execute (cmd_line);
   
-  if (pid == -1)
+  
+  if (pid == -1){
+    lock_release(&syscall_lock);
     return pid;
-
+    
+  }
+    
   struct thread *current_thread = thread_current ();
   struct thread *child_process = get_thread_with_pid (pid);
 
@@ -234,20 +246,31 @@ syscall_exec (const char *cmd_line)
      
      loaded variable means that child's load() is done.
      failed variable means that child's load() is failed. */
-  while (!child_process->loaded)
+  // printf("before child %d load_sema down\n",child_process->tid);
+  sema_down (&child_process->load_sema);
+  //printf("after load_sema down\n");
+  if (child_process->failed)
   {
-    thread_yield ();
+    lock_release(&syscall_lock);
+    list_remove (&child_process->elem_child);
+    sema_up (&child_process->delete_sema);
     
-    /* If load() is failed, remove the child from children and
-       allow that child can be deleted. */
-    if (child_process->failed)
-    {
-      list_remove (&child_process->elem_child);
-      sema_up (&child_process->delete_sema);
-      return -1;
-    }
+    return -1;
   }
-
+  
+  // while (!child_process->loaded)
+  // {
+  //   thread_yield ();
+  //   if (child_process->failed)
+  //   {
+      
+  //     lock_release (&syscall_lock);
+  //     list_remove (&child_process->elem_child);
+  //     sema_up (&child_process->delete_sema);
+  //     return -1;
+  //   }
+  // }
+  lock_release(&syscall_lock);
   return pid;
 }
 
@@ -298,14 +321,13 @@ syscall_open(const char* filename)
      lock_release(&syscall_lock);
      return -1;
   }
-    
-
+  
   struct thread *current_thread = thread_current ();
   struct file **fd_table = current_thread->fd_table;
   struct file *opened_file;
   char *token, *save_ptr;
   int new_fd = -1, i = 0;
-  
+
   opened_file = filesys_open (filename);
   
   /* If filesys_open() fails, return -1. */
@@ -372,6 +394,12 @@ syscall_filesize (int fd)
 int
 syscall_read (int fd, void *buffer, unsigned size)
 {
+  /* Check if the buffer is located in read-only section. */
+  void *upage = pg_round_down(buffer);
+  struct spt_entry *spte = get_spte (upage);
+  if (!spte->writable)
+    syscall_exit (-1);
+
   lock_acquire (&syscall_lock);
   struct thread *current_thread = thread_current ();
   struct file **fd_table = current_thread->fd_table;
@@ -403,8 +431,12 @@ syscall_read (int fd, void *buffer, unsigned size)
     syscall_exit (-1);
   }
 
+  pin_page (buffer, size);
+  int result = file_read (fd_table[fd], buffer, size);
   lock_release (&syscall_lock);
-  return file_read (fd_table[fd], buffer, size) ;
+  unpin_page (buffer, size);
+
+  return result;
 }
 /* System call handler function for wrtie() system call. 
    
@@ -441,9 +473,11 @@ syscall_write (int fd, const void *buffer, unsigned size)
     lock_release (&syscall_lock);
     return 0;
   }
-
   lock_release (&syscall_lock);
-  return file_write (fd_table[fd], buffer,size);
+  pin_page (buffer, size);
+  int result = file_write (fd_table[fd], buffer,size);
+  unpin_page (buffer, size);
+  return result;
 }
 
 /* System call handler function for seek() system call. 
@@ -453,24 +487,18 @@ syscall_write (int fd, const void *buffer, unsigned size)
 void
 syscall_seek (int fd, unsigned position)
 {
-  lock_acquire (&syscall_lock);
   struct thread *current_thread = thread_current ();
   struct file **fd_table = current_thread->fd_table ; 
 
   /* Check the validity of the fd. */
   if (fd < 2 || fd >= FD_MAX_SIZE)
-  {
-    lock_release (&syscall_lock);
     syscall_exit (-1);
-  }
   if (fd_table[fd] == NULL)
-  {
-    lock_release (&syscall_lock);
     syscall_exit (-1);
-  }
-
-  lock_release (&syscall_lock);
+  
+  lock_acquire(&syscall_lock);
   file_seek (fd_table[fd], position);
+  lock_release(&syscall_lock);
 }
 
 /* System call handler function for tell() system call. 
@@ -480,24 +508,19 @@ syscall_seek (int fd, unsigned position)
 unsigned
 syscall_tell (int fd)
 {
-  lock_acquire (&syscall_lock); 
   struct thread *current_thread = thread_current ();
   struct file **fd_table = current_thread->fd_table ; 
 
   /* Check the validity of the fd. */
   if (fd < 2 || fd >= FD_MAX_SIZE)
-  {
-    lock_release (&syscall_lock);
     syscall_exit (-1);
-  }
   if (fd_table[fd] == NULL)
-  {
-    lock_release (&syscall_lock);
     syscall_exit (-1);
-  }  
 
+  lock_acquire (&syscall_lock);
+  unsigned result = (unsigned)file_tell (fd_table[fd]);
   lock_release (&syscall_lock);
-  return (unsigned)file_tell (fd_table[fd]);
+  return result;
 }
 /* System call handler function for close() system call. 
    
@@ -505,29 +528,21 @@ syscall_tell (int fd)
 void
 syscall_close (int fd)
 {
-  lock_acquire(&syscall_lock);
   struct thread *current_thread = thread_current ();
   struct file **fd_table = current_thread->fd_table;
 
   /* Check the validity of the fd. */
-  if (fd < 2 || fd >= FD_MAX_SIZE){
-    lock_release(&syscall_lock);
+  if (fd < 2 || fd >= FD_MAX_SIZE)
     syscall_exit (-1);
-  
-  }
-  
-  if (fd_table[fd] == NULL){
-    lock_release(&syscall_lock);
-    syscall_exit (-1);
-  }
-  /* After closing fd, fd_table must be updated. */
 
+  if (fd_table[fd] == NULL)
+    syscall_exit (-1);
+  
+  lock_acquire (&syscall_lock);
   file_close(fd_table[fd]);
-
+  /* After closing fd, fd_table must be updated. */
   fd_table[fd] = NULL;
-  
-
-  lock_release(&syscall_lock);
+  lock_release (&syscall_lock);
 }
 
 /* System call handler function for mmap() system call.
@@ -543,16 +558,17 @@ syscall_mmap (int fd, void *addr)
   struct file *file = cur->fd_table[fd];
   off_t file_len;
 
-  lock_release (&syscall_lock);
-
-  if(file == NULL
+  if (file == NULL
      || pg_ofs (addr) != 0
      || (file_len = file_length (file)) == 0
      || addr == (void*)0
      || is_kernel_vaddr (addr) 
      || fd == 0
      || fd == 1)
-     return -1;
+  {
+    lock_release (&syscall_lock);
+    return -1;
+  }
 
   uint32_t read_bytes, zero_bytes;
   read_bytes = file_len;
@@ -568,7 +584,10 @@ syscall_mmap (int fd, void *addr)
     {
       /* Detect overlapping with other segment. */
       if (get_spte(addr) != NULL)
+      {
+        lock_release (&syscall_lock);
         return -1;
+      }
       
       /* Calculate how to fill this page.
          We will read PAGE_READ_BYTES bytes from FILE
@@ -582,8 +601,11 @@ syscall_mmap (int fd, void *addr)
                                             page_zero_bytes, true);
       
       if (created_spte == NULL)
-         return false;
-      
+      {
+        lock_release (&syscall_lock);
+        return false;
+      }
+
       /* Advance. */
       offset += PGSIZE;
       read_bytes -= page_read_bytes;
@@ -592,6 +614,7 @@ syscall_mmap (int fd, void *addr)
     }
 
   cur->mmap_table[fd] = new_file;
+  lock_release (&syscall_lock);
   return fd;
 }
 
@@ -601,17 +624,21 @@ syscall_mmap (int fd, void *addr)
 void
 syscall_munmap (mapid_t mapping)
 {
+  lock_acquire (&syscall_lock);
   struct thread *cur = thread_current ();
   int fd = mapping;
   struct file* file = cur->mmap_table[fd];
  
   /* Unmmaping unmapped mapping will be denied. */
   if(cur->mmap_table[fd] == NULL)
+  {
+    lock_release (&syscall_lock);
     syscall_exit (-1);
+  }
 
   struct hash spt = cur->spt;
   struct hash_iterator i;
-  
+
   hash_first (&i, &spt);
 
   while (hash_next (&i))
@@ -648,10 +675,11 @@ syscall_munmap (mapid_t mapping)
         }
 
         cur->mmap_table[fd] = NULL;
-        hash_delete (&cur->spt, &entry->elem);
+        // hash_delete(&spt, hash_cur (&i));
       }
   }
   file_close(file);
+  lock_release (&syscall_lock);
 } 
 
 /* Check if there are children which does not exit yet.

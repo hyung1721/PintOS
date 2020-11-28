@@ -74,7 +74,11 @@ free_frame_entry (struct thread *cur)
     while (e != list_end (&frame_table))
     {
         struct ft_entry *temp_entry = list_entry (e, struct ft_entry, elem);
-      
+    
+        if(temp_entry->spte->state == MMAP) {
+             e = list_next (e);
+             continue;
+        }
         if(cur == temp_entry->t)
         {
             pagedir_clear_page (cur->pagedir,

@@ -73,6 +73,7 @@ create_spte_from_stack (uint8_t *upage)
     spte->state = MEMORY; //****
     spte->writable = true;
     spte->thread = thread_current();
+    spte->pinned = false;
     hash_insert (&thread_current ()->spt, &spte->elem);
 
     return spte;
@@ -150,6 +151,7 @@ create_spte_from_exec (struct file *file, int32_t ofs,
     spte->state = EXEC_FILE;
     spte->writable = writable;
     spte->thread = thread_current();
+    spte->pinned = false;
     spte->file = file;
     spte->offset = ofs;
     spte->read_bytes = read_bytes;
@@ -174,6 +176,7 @@ create_spte_from_mmap(struct file *file, int32_t offset,
     spte->state = MMAP;
     spte->writable = writable;
     spte->thread = thread_current();
+    spte->pinned = false;
     spte->file = file;
     spte->offset = offset;
     spte->read_bytes = read_bytes;
@@ -181,4 +184,58 @@ create_spte_from_mmap(struct file *file, int32_t offset,
     hash_insert (&thread_current ()->spt, &spte->elem);
 
     return spte;
+}
+
+void
+pin_page (void *buffer, unsigned size)
+{
+    struct thread *current_thread = thread_current ();
+    struct hash spt = current_thread->spt;
+    bool load;
+    void *current_upage;
+
+    for (current_upage = pg_round_down(buffer); current_upage < buffer + size; current_upage += PGSIZE)
+    {
+        struct spt_entry *spte = get_spte(current_upage);
+        if (spte)
+        {
+            if (spte->state == EXEC_FILE)
+            {
+            load = load_from_exec(spte);
+            }
+            else if (spte->state == SWAP_DISK)
+            {  
+            load = load_from_swap (spte);
+            }
+            else if (spte->state == MMAP)
+            {
+            load = load_from_mmap(spte);
+            }
+
+            if (spte->state == MEMORY)
+                spte->pinned = true;
+            else
+                printf("Pinning failed in pin_page()\n");
+        }
+
+    }
+
+}
+
+void
+unpin_page (void *buffer, unsigned size)
+{
+    struct thread *current_thread = thread_current ();
+    struct hash spt = current_thread->spt;
+    void *current_upage;
+
+    for (current_upage = pg_round_down(buffer); current_upage < buffer + size; current_upage += PGSIZE)
+    {
+        struct spt_entry *spte = get_spte(current_upage);
+        
+        if(spte)
+        {
+            spte->pinned = false;
+        }
+    }
 }

@@ -680,6 +680,7 @@ init_thread (struct thread *t, const char *name, int priority)
 
 #ifdef USERPROG
   list_init (&t->children);
+  sema_init (&t->load_sema, 0);
   sema_init (&t->exit_sema, 0);
   sema_init (&t->delete_sema, 0);
 

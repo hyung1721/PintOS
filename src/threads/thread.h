@@ -112,6 +112,7 @@ struct thread
     struct file* fd_table[FD_MAX_SIZE]; /* Array of file descriptor.  */
 
     int status_exit;                    /* Exit status for exit() system call. */
+    struct semaphore load_sema;
     struct semaphore exit_sema;         /* Semaphore for synchronization of exiting child. */
     struct semaphore delete_sema;       /* Semaphore for synchronization of deleting child from children. */
    

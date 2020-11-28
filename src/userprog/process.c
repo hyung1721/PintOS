@@ -198,12 +198,14 @@ start_process (void *file_name_)
   if (!success) 
   {
     thread_current ()->failed = true;
+    sema_up (&thread_current ()->load_sema);
     thread_exit ();
   }
   else
   {
     /* Do pushing arguments into stack. */
     thread_current ()->loaded = true;
+    sema_up (&thread_current ()->load_sema);
     push_arguments(argc, argv, &if_.esp);
   }
 
@@ -265,7 +267,7 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
-  
+
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   free_frame_entry(cur);
@@ -571,55 +573,58 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   //printf("load segment begin with writable : %d upage : %p\n", writable, upage);
   file_seek (file, ofs);
 
-// while (read_bytes > 0 || zero_bytes > 0) 
-//     {
-      
-//       /* Calculate how to fill this page.
-//          We will read PAGE_READ_BYTES bytes from FILE
-//          and zero the final PAGE_ZERO_BYTES bytes. */
-//       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
-//       size_t page_zero_bytes = PGSIZE - page_read_bytes;
+  // while (read_bytes > 0 || zero_bytes > 0) 
+  //     {
+        
+  //       /* Calculate how to fill this page.
+  //         We will read PAGE_READ_BYTES bytes from FILE
+  //         and zero the final PAGE_ZERO_BYTES bytes. */
+  //       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+  //       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-//       //printf("page read bytes : %d\n", page_read_bytes);
-      
+  //       //printf("page read bytes : %d\n", page_read_bytes);
+        
 
-//       created_spte = create_spte_from_exec(file, ofs, upage, 
-//                                             page_read_bytes, page_zero_bytes, writable);
-      
-//       if (created_spte == NULL)
-//          return false;
-      
-      
-//       /* Get a page of memory. */
-//       uint8_t *kpage = frame_alloc (PAL_USER, created_spte);
-//       //printf("upage : %p kpage: %p | ", upage, kpage);
-      
-//       if (kpage == NULL)
-//       {
-//         free (created_spte);
-//       }
+  //       created_spte = create_spte_from_exec(file, ofs, upage, 
+  //                                             page_read_bytes, page_zero_bytes, writable);
+        
+  //       printf("file: %p, offset: %d, upage: %d\n", file, offset, upage);
+  //     printf("read_bytes: %d, zero_bytes: %d, writable: %d\n", page_read_bytes, page_zero_bytes, writable);
 
-//       /* Load this page. */
-//       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-//         { 
-//           palloc_free_page (kpage);
-//           return false; 
-//         }
-//       memset (kpage + page_read_bytes, 0, page_zero_bytes);
+  //       if (created_spte == NULL)
+  //         return false;
+        
+        
+  //       /* Get a page of memory. */
+  //       uint8_t *kpage = frame_alloc (PAL_USER, created_spte);
+  //       //printf("upage : %p kpage: %p | ", upage, kpage);
+        
+  //       if (kpage == NULL)
+  //       {
+  //         free (created_spte);
+  //       }
 
-//       /* Add the page to the process's address space. */
-//       if (!install_page (upage, kpage, writable)) 
-//         {
-//           palloc_free_page (kpage);
-//           return false; 
-//         }
-//       //printf("Thread %d : upage %p mapped to frame %p r : %d , z : %d\n",thread_current()->tid,upage,kpage,page_read_bytes,page_zero_bytes);
+  //       /* Load this page. */
+  //       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
+  //         { 
+  //           palloc_free_page (kpage);
+  //           return false; 
+  //         }
+  //       memset (kpage + page_read_bytes, 0, page_zero_bytes);
 
-//       /* Advance. */
-//       read_bytes -= page_read_bytes;
-//       zero_bytes -= page_zero_bytes;
-//       upage += PGSIZE;
-//     }
+  //       /* Add the page to the process's address space. */
+  //       if (!install_page (upage, kpage, writable)) 
+  //         {
+  //           palloc_free_page (kpage);
+  //           return false; 
+  //         }
+  //       //printf("Thread %d : upage %p mapped to frame %p r : %d , z : %d\n",thread_current()->tid,upage,kpage,page_read_bytes,page_zero_bytes);
+
+  //       /* Advance. */
+  //       read_bytes -= page_read_bytes;
+  //       zero_bytes -= page_zero_bytes;
+  //       upage += PGSIZE;
+  //     }
 
   /* For each page of segment, we just create new supplemental page
      table entry for lazy loading. */
@@ -741,17 +746,12 @@ load_from_exec (struct spt_entry *spte)
 
   if (spte->read_bytes > 0)
   {  
-    lock_acquire (&filesys_lock);
-
     if (file_read_at (spte->file, frame, spte->read_bytes, spte->offset)
         != (int)spte->read_bytes)
     {  
-      lock_release (&filesys_lock);
       palloc_free_page (frame);
       return false;
     }
-    
-    lock_release (&filesys_lock);
     memset (frame + spte->read_bytes, 0, spte->zero_bytes);
   }
 

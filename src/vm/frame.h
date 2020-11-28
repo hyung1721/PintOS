@@ -19,5 +19,6 @@ void init_frame_table (void);
 void *frame_alloc (enum palloc_flags flags, struct spt_entry *spte);
 struct ft_entry *create_fte (void *frame, struct spt_entry *spte);
 void free_frame_entry (struct thread *cur);
+struct list_elem *remove_ft_entry (struct ft_entry *fte);
 
 #endif

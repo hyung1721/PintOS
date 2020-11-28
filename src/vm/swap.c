@@ -80,6 +80,11 @@ find_victim (void)
     {
 
         struct ft_entry *entry = list_entry (evict_elem, struct ft_entry, elem);
+        
+        /* If current frame is pinned, it must not be evicted. */
+        if (entry->spte->pinned)
+            continue;
+        
         /* If current entry is not accessed, choose this entry as a
            victim frame. If not, set access bit zero and continue.
 

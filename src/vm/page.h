@@ -6,12 +6,14 @@
 #include "threads/thread.h"
 #include "userprog/pagedir.h"
 #include "threads/pte.h"
+#include "frame.h"
 
 enum status {
     SWAP_DISK,                    /* Frame is in swap disk. */
     MEMORY,                       /* Frame is in physical memory. */
     EXEC_FILE,                     /* Frame is executable file. */
-    MMAP                          
+    MMAP,    
+    NONE                 
 };
 
 struct spt_entry {
@@ -27,6 +29,7 @@ struct spt_entry {
 
     block_sector_t swap_index;    /* Location of frame in swap disk. */
 
+    bool pinned;
     /* For lazy loading part of project #3-2. */
     struct file *file;
     size_t offset;
@@ -49,5 +52,8 @@ struct spt_entry * create_spte_from_mmap(struct file *file, int32_t offset,
                        uint32_t zero_bytes, bool writable);
 void destroy_spte (struct hash_elem *e, void *aux);
 void destroy_spt (struct hash *spt);
+
+void pin_page (void *buffer, unsigned size);
+void unpin_page (void *buffer, unsigned size);
 
 #endif
