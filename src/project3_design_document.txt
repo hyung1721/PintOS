@@ -58,7 +58,8 @@ growth_cnt는 stack_growth를 할때 stack이 얼마나 자랐는지를 count하
         struct thread *thread;        /* Thread which controls this entry.*/
 
         block_sector_t swap_index;    /* Location of frame in swap disk. */
-
+	
+	bool pinned;
         /* For lazy loading part of project #3-2. */
         struct file *file;
         size_t offset;
@@ -68,7 +69,15 @@ growth_cnt는 stack_growth를 할때 stack이 얼마나 자랐는지를 count하
 
 spt_entry는 supplemental page table에 들어갈 entry 구조체이다.
 mapping된 frame의 state, frame의 address, swap_index 등의 변수를 가지고 있어
-page fault가 일어났을 때 적절한 대응을 할 수 있도록 필요한 정보를 제공한다. 
+page fault가 일어났을 때 적절한 대응을 할 수 있도록 필요한 정보를 제공한다.
+
+boolean 변수인 pinned는 spt_entry가 담고있는 특정 frame에 evict되지 않도록
+표시하기 위한 변수이다. Pintos manual에 따라서, file 관련 함수를 호출하여 buffer를
+사용해야 할때, buffer의 데이터가 담기는 frame을 pin, 즉, memory에 고정함으로써
+이후 victim을 찾는 과정에서 swap disk로 내보내지지 않도록 하였다.
+
+lazy loading을 구현하기 위해서 추가된 변수들은 executable file에 대한
+정보를 저장한다.
 
 다음은 vm/frame.h에 있는 extern 문이다.
 
@@ -322,14 +331,59 @@ swap_in,out 같은 operation과 frame_table은 여러 process에 의해 공유�
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+struct thread
+{
+    struct file *mmap_table[FD_MAX_SIZE]; /* Array of memory mapped file pointer. */
+}
+
+각 thread마다 가진 mmap_table로 file*를 element로 가진 array이다.
+file descripter가 fd인 File을 mmap하면 mmap_table의 index가 fd인 곳에 해당 
+파일의 file*가 저장된다.
+
+enum status {
+    SWAP_DISK,                    /* Frame is in swap disk. */
+    MEMORY,                       /* Frame is in physical memory. */
+    EXEC_FILE,                     /* Frame is executable file. */
+    MMAP             
+};
+
+spt_entry의 status에 MMAP state를 추가했다.
+mmap도 lazy loading이 되어야 함으로 처음 spte를 만들 때 MMAP state를 갖게하여
+page fault때 적절한 handling을 할 수 있다.
+
 ---- ALGORITHMS ----
 
 >> C2: Describe how memory mapped files integrate into your virtual
 >> memory subsystem.  Explain how the page fault and eviction
 >> processes differ between swap pages and other pages.
 
+사용자가 호출하는 mmap()은 syscall_handler를 통해 syscall_mmap()을 부른다.
+이때 kernel은 mmap할 파일을 page size만큼 잘라, 반복문을 돌며 spt_entry를 만든다.
+이때 사용되는 함수가 create_spte_from_mmap()이고 이 함수에서 spt_entry의 state가 
+MMAP으로 정해진다.
+
+이후, 사용자가 mapping된 frame을 사용하고자 하면 page fault가 발생하여 page fault
+handler가 실행된다. handler에서 spt_entry의 state가 MMAP인 경우 load_from_mmap()을 
+통해 physical memory에 file의 내용이 load가 되어 사용자는 frame를 참조하는 것으로 
+파일을 읽는 것과 같은 효과를 얻게 된다.
+
+mmap()을 통해 load한 frame은 일반적인 frame과 eviction process가 다르다.
+일반적인 frame은 evict를 하게 될 경우, swap_disk로 옮기면 끝이지만, mmap()으로 
+load된 frame은 evict시 file에 변경된 내용을 옮겨주고 swap_disk로 옮겨야 한다.
+
+우리는 이것을 구현하기 위해서 supplemental page table entry에 mmaped boolean
+변수를 추가하였다. mmap()의 호출로 인해서 만들어진 spte라면 mmaped의 값이 true로 설정되고,
+이후 victim을 고르는 과정에서 spte의 mmaped값을 검사한다. 만약 true라면 spte에 담긴
+file의 정보를 통해서 frame의 내용을 file에 write하고 swap disk로 옮긴다.
+
 >> C3: Explain how you determine whether a new file mapping overlaps
 >> any existing segment.
+
+새로운 file mapping이 생기는 경우는 프로세스가 mmap() system call을 호출하였을 때다.
+우리는 이때 mmap()의 인자로 받은 address부터 시작하여 file의 크기를 더한 만큼의 address까지
+순회하며 이미 만들어진 supplemental page table entry가 있는지 검사한다.
+만약 있다면, stack, data, code 등의 segment를 침범하게 되는 것이므로 exit(-1)을
+호출하여 프로세스가 종료되도록 한다. 
 
 ---- RATIONALE ----
 
@@ -339,6 +393,14 @@ swap_in,out 같은 operation과 frame_table은 여러 process에 의해 공유�
 >> that much of their implementation can be shared.  Explain why your
 >> implementation either does or does not share much of the code for
 >> the two situations.
+
+executables를 load하기 위해서 만든 함수는 load_from_exec()이고, mmap file을
+load하기 위해서 만든 함수는 load_from_mmap()이다.
+
+처음에는 두 함수의 목적이 다르기 때문에 분리하여 구현을 하였으나, 결국은 두 함수 모두 file의 
+내용을 physical memory로 불러오는 것이기 때문에 내부 구현의 차이점은 없었다.
+
+하지만, 코드의 이해를 돕고자 우리는 분리된 형태로 함수를 사용하였다.
 
 			   SURVEY QUESTIONS
 			   ================

@@ -1,5 +1,7 @@
 #include "swap.h"
 #include "bitmap.h"
+#include "filesys/file.h"
+#include "filesys/filesys.h"
 
 /* 1-1 mapping from swap_table to swap disk blocks. */
 struct bitmap *swap_table;
@@ -95,6 +97,16 @@ find_victim (void)
             entry->spte->state = SWAP_DISK;
             pagedir_clear_page (entry->spte->thread->pagedir,
                                 entry->spte->upage);
+
+            if (entry->spte->mmaped 
+                && pagedir_is_dirty(entry->t->pagedir, entry->spte->upage))
+            {
+                lock_acquire (&filesys_lock);
+                file_write_at (entry->spte->file, entry->frame, 
+                               entry->spte->read_bytes,
+                               entry->spte->offset);
+                lock_release (&filesys_lock);
+            }
 
             return list_entry (evict_elem, struct ft_entry, elem); 
         }

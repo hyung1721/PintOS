@@ -12,8 +12,7 @@ enum status {
     SWAP_DISK,                    /* Frame is in swap disk. */
     MEMORY,                       /* Frame is in physical memory. */
     EXEC_FILE,                     /* Frame is executable file. */
-    MMAP,    
-    NONE                 
+    MMAP             
 };
 
 struct spt_entry {
@@ -30,6 +29,7 @@ struct spt_entry {
     block_sector_t swap_index;    /* Location of frame in swap disk. */
 
     bool pinned;
+    bool mmaped;
     /* For lazy loading part of project #3-2. */
     struct file *file;
     size_t offset;

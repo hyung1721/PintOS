@@ -74,6 +74,7 @@ create_spte_from_stack (uint8_t *upage)
     spte->writable = true;
     spte->thread = thread_current();
     spte->pinned = false;
+    spte->mmaped = false;
     hash_insert (&thread_current ()->spt, &spte->elem);
 
     return spte;
@@ -152,6 +153,7 @@ create_spte_from_exec (struct file *file, int32_t ofs,
     spte->writable = writable;
     spte->thread = thread_current();
     spte->pinned = false;
+    spte->mmaped = false;
     spte->file = file;
     spte->offset = ofs;
     spte->read_bytes = read_bytes;
@@ -177,6 +179,7 @@ create_spte_from_mmap(struct file *file, int32_t offset,
     spte->writable = writable;
     spte->thread = thread_current();
     spte->pinned = false;
+    spte->mmaped = true;
     spte->file = file;
     spte->offset = offset;
     spte->read_bytes = read_bytes;

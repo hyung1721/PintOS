@@ -181,7 +181,6 @@ syscall_halt (void)
 void
 syscall_exit (int status)
 {
-  //printf("exit start\n");
   char thread_name[128];
   char *token, *save_ptr;
   struct thread *cur = thread_current ();
@@ -228,7 +227,6 @@ pid_t
 syscall_exec (const char *cmd_line)
 {
   lock_acquire(&syscall_lock);
-  //printf("Lock acquire %d exec\n",thread_current ()->tid);
   /* Passing cmd_line, create a new process. */
   pid_t pid = process_execute (cmd_line);
   
@@ -246,9 +244,7 @@ syscall_exec (const char *cmd_line)
      
      loaded variable means that child's load() is done.
      failed variable means that child's load() is failed. */
-  // printf("before child %d load_sema down\n",child_process->tid);
   sema_down (&child_process->load_sema);
-  //printf("after load_sema down\n");
   if (child_process->failed)
   {
     lock_release(&syscall_lock);
@@ -258,18 +254,6 @@ syscall_exec (const char *cmd_line)
     return -1;
   }
   
-  // while (!child_process->loaded)
-  // {
-  //   thread_yield ();
-  //   if (child_process->failed)
-  //   {
-      
-  //     lock_release (&syscall_lock);
-  //     list_remove (&child_process->elem_child);
-  //     sema_up (&child_process->delete_sema);
-  //     return -1;
-  //   }
-  // }
   lock_release(&syscall_lock);
   return pid;
 }

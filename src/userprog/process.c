@@ -570,61 +570,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   struct spt_entry *created_spte;
 
   off_t offset = ofs;
-  //printf("load segment begin with writable : %d upage : %p\n", writable, upage);
   file_seek (file, ofs);
-
-  // while (read_bytes > 0 || zero_bytes > 0) 
-  //     {
-        
-  //       /* Calculate how to fill this page.
-  //         We will read PAGE_READ_BYTES bytes from FILE
-  //         and zero the final PAGE_ZERO_BYTES bytes. */
-  //       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
-  //       size_t page_zero_bytes = PGSIZE - page_read_bytes;
-
-  //       //printf("page read bytes : %d\n", page_read_bytes);
-        
-
-  //       created_spte = create_spte_from_exec(file, ofs, upage, 
-  //                                             page_read_bytes, page_zero_bytes, writable);
-        
-  //       printf("file: %p, offset: %d, upage: %d\n", file, offset, upage);
-  //     printf("read_bytes: %d, zero_bytes: %d, writable: %d\n", page_read_bytes, page_zero_bytes, writable);
-
-  //       if (created_spte == NULL)
-  //         return false;
-        
-        
-  //       /* Get a page of memory. */
-  //       uint8_t *kpage = frame_alloc (PAL_USER, created_spte);
-  //       //printf("upage : %p kpage: %p | ", upage, kpage);
-        
-  //       if (kpage == NULL)
-  //       {
-  //         free (created_spte);
-  //       }
-
-  //       /* Load this page. */
-  //       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-  //         { 
-  //           palloc_free_page (kpage);
-  //           return false; 
-  //         }
-  //       memset (kpage + page_read_bytes, 0, page_zero_bytes);
-
-  //       /* Add the page to the process's address space. */
-  //       if (!install_page (upage, kpage, writable)) 
-  //         {
-  //           palloc_free_page (kpage);
-  //           return false; 
-  //         }
-  //       //printf("Thread %d : upage %p mapped to frame %p r : %d , z : %d\n",thread_current()->tid,upage,kpage,page_read_bytes,page_zero_bytes);
-
-  //       /* Advance. */
-  //       read_bytes -= page_read_bytes;
-  //       zero_bytes -= page_zero_bytes;
-  //       upage += PGSIZE;
-  //     }
 
   /* For each page of segment, we just create new supplemental page
      table entry for lazy loading. */
