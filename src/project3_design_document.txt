@@ -13,6 +13,12 @@
 
 ---- PRELIMINARIES ----
 
+# of tokens to use : 0
+
+Contribution
+김우진: 50%
+김준범: 50%
+
 >> If you have any preliminary comments on your submission, notes for the
 >> TAs, or extra credit, please give them here.
 
