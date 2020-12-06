@@ -21,6 +21,8 @@
 #include "vm/page.h"
 #include "vm/frame.h"
 
+#include "filesys/inode.h"
+
 #define STACK_HEURISTIC 32
 #define MAX_PAGE_STACK 2048
 
@@ -137,6 +139,7 @@ process_execute (const char *file_name)
   {
     /* If creation succeed, this thread should be child of current thread. */
     new_thread = get_thread_with_pid(tid);
+    new_thread->current_dir = dir_reopen (current_thread->current_dir);
     list_push_back (&current_thread->children, &new_thread->elem_child);
   }
   return tid;

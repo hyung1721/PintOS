@@ -472,6 +472,7 @@ thread_exit (void)
      when it calls thread_schedule_tail(). */
   intr_disable ();
   list_remove (&thread_current()->allelem);
+  dir_close (thread_current ()->current_dir);
   thread_current ()->status = THREAD_DYING;
   schedule ();
   NOT_REACHED ();
@@ -692,7 +693,11 @@ init_thread (struct thread *t, const char *name, int priority)
 #endif
   for(int i = 0 ; i < FD_MAX_SIZE ; i++)
     t->mmap_table[i] = NULL;
+
   t->growth_cnt = 1;
+
+  for(int i = 0 ; i < FD_MAX_SIZE ; i++)
+    t->directory_table[i] = NULL;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);

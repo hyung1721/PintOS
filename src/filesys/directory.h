@@ -27,4 +27,6 @@ bool dir_add (struct dir *, const char *name, block_sector_t);
 bool dir_remove (struct dir *, const char *name);
 bool dir_readdir (struct dir *, char name[NAME_MAX + 1]);
 
+struct dir *parsing_file_name (const char *, char *);
+
 #endif /* filesys/directory.h */

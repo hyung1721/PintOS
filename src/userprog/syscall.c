@@ -9,6 +9,8 @@
 #include "threads/palloc.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
+#include "filesys/inode.h"
+#include "filesys/directory.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
 #include "devices/shutdown.h"
@@ -44,6 +46,11 @@ unsigned syscall_tell (int);
 void syscall_close (int);
 mapid_t syscall_mmap (int, void *);
 void syscall_munmap (mapid_t);
+bool syscall_chdir (const char *);
+bool syscall_mkdir (const char *);
+bool syscall_readdir (int, char *);
+bool syscall_isdir (int);
+int syscall_inumber (int);
 
 void check_child_before_exit(struct thread *);
 
@@ -145,6 +152,27 @@ syscall_handler (struct intr_frame *f)
         break;
       case SYS_MUNMAP:
         syscall_munmap (*(mapid_t *)(f->esp + 4));
+        break;
+      case SYS_CHDIR:
+        check_invalid_pointer (thread_current ()->pagedir,
+                               *(const char **)(f->esp + 4));
+        f->eax = syscall_chdir (*(const char **)(f->esp + 4));
+        break;
+      case SYS_MKDIR:
+        check_invalid_pointer (thread_current ()->pagedir,
+                               *(const char **)(f->esp + 4));
+        f->eax = syscall_mkdir (*(const char **)(f->esp + 4));
+        break;
+      case SYS_READDIR:
+        check_invalid_pointer (thread_current ()->pagedir,
+                               *(const void **)(f->esp + 8));
+        f->eax = syscall_readdir (*(int *)(f->esp + 4), *(char **)(f->esp + 8));
+        break;
+      case SYS_ISDIR:
+        f->eax = syscall_isdir (*(int *)(f->esp + 4));
+        break;
+      case SYS_INUMBER:
+        f->eax = syscall_inumber (*(int *)(f->esp + 4));
         break;
       default:
         printf ("SYSCALL NUM %d is not yet implemented!\n", syscall_num);
@@ -275,8 +303,9 @@ syscall_wait (pid_t pid)
 bool
 syscall_create (const char *filename, unsigned initial_size)
 {
+  if(strlen(filename)==0) return false;
   lock_acquire (&syscall_lock);
-  bool result = filesys_create (filename, initial_size);
+  bool result = filesys_create (filename, initial_size, false);
   lock_release (&syscall_lock);
   return result;
 }
@@ -313,7 +342,7 @@ syscall_open(const char* filename)
   int new_fd = -1, i = 0;
 
   opened_file = filesys_open (filename);
-  
+
   /* If filesys_open() fails, return -1. */
   if (opened_file == NULL){
     lock_release (&syscall_lock);
@@ -458,6 +487,9 @@ syscall_write (int fd, const void *buffer, unsigned size)
     return 0;
   }
   lock_release (&syscall_lock);
+  if (inode_is_dir (file_get_inode (fd_table[fd])))
+    return -1;
+  
   pin_page (buffer, size);
   int result = file_write (fd_table[fd], buffer,size);
   unpin_page (buffer, size);
@@ -665,6 +697,145 @@ syscall_munmap (mapid_t mapping)
   file_close(file);
   lock_release (&syscall_lock);
 } 
+
+bool
+syscall_chdir (const char *dir)
+{
+  lock_acquire (&syscall_lock);
+  struct thread *current_thread = thread_current ();
+  bool result = false;
+  char file_name[15];
+  struct dir *_dir = parsing_file_name (dir, file_name);
+  struct inode *inode = NULL;
+
+  //printf("filename : %s\n",file_name);
+
+  //printf("chdir sector num %d\n",inode_get_inumber(dir_get_inode(_dir)) );
+  
+  if (_dir != NULL && dir_lookup (_dir, file_name, &inode))
+  {
+    //printf("inside if\n");
+    struct dir *new_dir = dir_open (inode);
+    if (new_dir)
+    {
+      dir_close (current_thread->current_dir);
+      current_thread->current_dir = new_dir;
+      //printf("thread number %d\n",current_thread->tid);
+      //printf("after chdir sector num %d\n",inode_get_inumber(inode));
+      result = true;
+    }
+    else
+      result = false; 
+  }
+  lock_release (&syscall_lock);
+  return result;
+}
+
+bool
+syscall_mkdir (const char *dir)
+{
+  if(strlen(dir)==0) return false;
+  lock_acquire (&syscall_lock);
+  bool result = filesys_create (dir, 0, true);
+  lock_release (&syscall_lock);
+  return result;
+}
+
+bool
+syscall_readdir (int fd, char *name)
+{
+  struct thread *current_thread = thread_current ();
+  struct file **fd_table = current_thread->fd_table;
+  struct dir* dir;
+  lock_acquire(&syscall_lock);
+
+  if (fd < 2 || fd >= FD_MAX_SIZE){
+    lock_release(&syscall_lock);
+    syscall_exit (-1);
+  }
+  
+
+  if (fd_table[fd] == NULL)
+  {
+    lock_release(&syscall_lock);
+    syscall_exit (-1);
+  }
+    
+
+  struct file* file = fd_table[fd];
+  struct inode* inode = file_get_inode (fd_table[fd]);
+  
+  if(inode == NULL){
+    lock_release(&syscall_lock);
+    return false;
+  } 
+
+  if(!inode_is_dir (inode)){
+    lock_release(&syscall_lock);
+    return false;
+  } 
+
+  
+
+  if(current_thread->directory_table[fd] == NULL){
+    dir = dir_open(inode);
+    if(dir == NULL){
+       lock_release(&syscall_lock);
+       return false;
+    }
+    current_thread->directory_table[fd] = dir;
+  }
+  else{
+    dir = current_thread->directory_table[fd];
+  }
+  bool result = dir_readdir(dir,name);
+  if(!result){
+    current_thread->directory_table[fd] = NULL;
+    free(dir);
+  }
+    
+  
+  lock_release(&syscall_lock);
+  return result;
+}
+
+bool
+syscall_isdir (int fd)
+{
+  struct thread *current_thread = thread_current ();
+  struct file **fd_table = current_thread->fd_table;
+
+  /* Check the validity of the fd. */
+  if (fd < 2 || fd >= FD_MAX_SIZE)
+    syscall_exit (-1);
+
+  if (fd_table[fd] == NULL)
+    syscall_exit (-1);
+  
+  lock_acquire (&syscall_lock);
+  bool result = inode_is_dir (file_get_inode (fd_table[fd]));
+  lock_release (&syscall_lock);
+  return result;
+}
+
+int
+syscall_inumber (int fd)
+{
+  struct thread *current_thread = thread_current ();
+  struct file **fd_table = current_thread->fd_table;
+
+  /* Check the validity of the fd. */
+  if (fd < 2 || fd >= FD_MAX_SIZE)
+    syscall_exit (-1);
+
+  if (fd_table[fd] == NULL)
+    syscall_exit (-1);
+  
+  lock_acquire (&syscall_lock);
+  block_sector_t result = inode_get_inumber (file_get_inode (fd_table[fd]));
+  lock_release (&syscall_lock);
+  return result;
+}
 
 /* Check if there are children which does not exit yet.
    And do sema_up(&delete_sema) for those child because 

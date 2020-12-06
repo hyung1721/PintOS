@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include "synch.h"
 #include "hash.h"
+#include "filesys/directory.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -127,6 +128,11 @@ struct thread
    struct file *executable_file;        /* File pointer to process's executable file. */
    struct file *mmap_table[FD_MAX_SIZE];/* Array of memory mapped file pointer. */
 
+   struct dir *current_dir;
+
+
+   struct dir *directory_table [FD_MAX_SIZE];
+
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
@@ -155,6 +161,10 @@ tid_t thread_create (const char *name, int priority, thread_func *, void *);
 
 struct thread *get_thread_with_pid(tid_t pid);
 void thread_set_killed (void);
+
+int64_t current_closest_tick (void);
+void sleep_thread_with_ticks (int64_t start_tick, int64_t duration_tick);
+void wakeup_thread (void);
 
 void thread_block (void);
 void thread_unblock (struct thread *);
