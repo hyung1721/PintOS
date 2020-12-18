@@ -58,8 +58,6 @@ filesys_create (const char *name, off_t initial_size, bool is_dir)
   char file_name[15];
   struct dir *dir = parsing_file_name (name, file_name);
 
-  //printf("filesys create filename: %s\n",file_name);
-  //printf("%s is added to sector num %d\n",file_name, inode_get_inumber(dir_get_inode(dir)));
   bool success = (dir != NULL
                   && free_map_allocate (1, &inode_sector)
                   && inode_create (inode_sector, initial_size, is_dir)
@@ -67,11 +65,11 @@ filesys_create (const char *name, off_t initial_size, bool is_dir)
   if (!success && inode_sector != 0) 
     free_map_release (inode_sector, 1);
 
+  /* Add . and .. to created directory. */
   if (success && is_dir)
   {
-  
     struct dir *new_dir = dir_open (inode_open (inode_sector));
-    //printf("mkdir %s sector num %d\n",file_name,inode_get_inumber(dir_get_inode(new_dir)) );
+
     if (new_dir != NULL)
     {
       if (!dir_add (new_dir, ".", inode_sector))
@@ -99,10 +97,8 @@ filesys_open (const char *name)
   struct dir *dir = parsing_file_name(name, file_name);
   struct inode *inode = NULL;
 
-
-  //printf("sector num %d\n",inode_get_inumber(dir_get_inode(dir)));
-
-  //root dir
+  /* Opening the root directory does not require
+      dir_lookup() function. */
   if(!strcmp(name,"/")){
 
     inode = dir_get_inode(dir);
@@ -111,17 +107,8 @@ filesys_open (const char *name)
     return file;
   }
 
-  if (dir != NULL){
+  if (dir != NULL)
     dir_lookup (dir, file_name, &inode);
-
-    // if( strcmp(name,".") && strcmp(name,".."))
-    //   dir_close (dir);
-    // else{
-    //   free(dir);
-    // }
-  }
-  
-
 
   return file_open (inode);
 }

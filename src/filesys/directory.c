@@ -233,26 +233,19 @@ dir_remove (struct dir *dir, const char *name)
     goto done;
 
 
-  if(inode_is_dir(inode)){
+  if(inode_is_dir(inode))
+  {
     off_t ofs_;
     struct dir_entry e_;
+
     for (ofs_ = 0; inode_read_at (inode, &e_, sizeof e_, ofs_) == sizeof e_;
-          ofs_ += sizeof e_){
-      if(!strcmp(e_.name , ".") || !strcmp(e_.name , "..")) continue;
-    
-      if (e_.in_use){
-        return false;   
-      }  
+          ofs_ += sizeof e_)
+    {
+      if(!strcmp(e_.name , ".") || !strcmp(e_.name , ".."))
+        continue;
+      if (e_.in_use)
+        goto done;
     } 
-
-    // for (ofs_ = 0; inode_read_at (inode, &e_, sizeof e_, ofs_) == sizeof e_;
-    //       ofs_ += sizeof e_){
-    //   if(!strcmp(e_.name , ".") || !strcmp(e_.name , "..")){
-    //      e_.in_use = false;
-    //      inode_write_at (inode, &e_, sizeof e_, ofs_);
-    //   }
-    // } 
-
   }  
   
   /* Erase directory entry. */
@@ -330,12 +323,8 @@ parsing_file_name (const char *path_name, char *file_name)
 
   if (absolute_path)
     temp_dir = dir_open_root ();
-  else{
-    //printf("thread number %d\n",thread_current ()->tid);
-    //printf("current dir sector num: %d in parsing()\n", inode_get_inumber (dir_get_inode (thread_current ()->current_dir)));
+  else
     temp_dir = dir_reopen (thread_current ()->current_dir);
-    //printf("temp_dir sector num: %d in parsing()\n", inode_get_inumber (dir_get_inode (temp_dir)));
-  }
 
   for (int i = 0; i < count; i++)
   {

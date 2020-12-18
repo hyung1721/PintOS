@@ -20,25 +20,14 @@
 #define SECTOR_MAX_DOUBLY (MAX_DIRECT+128*MAX_INDIRECT+128*128)
 
 struct lock temp_lock;
-struct indirect_block
-{
-  block_sector_t direct[128];
-};
-
-struct doubly_indirect_block
-{
-  struct indirect_block *indirect[128];
-};
 
 /* On-disk inode.
    Must be exactly BLOCK_SECTOR_SIZE bytes long. */
 struct inode_disk
   {
-    //block_sector_t start;               /* First data sector. */
-
-    block_sector_t direct[MAX_DIRECT];                /* Direct blocks. */
-    struct indirect_block *indirect[MAX_INDIRECT];    /* Indirect blocks. */
-    struct doubly_indirect_block *doubly_indirect;    /* Doubly indirect blocks. */
+    block_sector_t direct[MAX_DIRECT];        /* Direct blocks. */
+    block_sector_t indirect[MAX_INDIRECT];    /* Indirect blocks. */
+    block_sector_t doubly_indirect;           /* Doubly indirect blocks. */
 
     /* # of direct blocks. */
     uint32_t last_direct;
@@ -145,17 +134,16 @@ bool file_growth(struct inode* inode, off_t size, off_t offset)
 
       int iter = indirect_num < (128 - last_indirect ) ? indirect_num : (128 - last_indirect );
 
+      block_sector_t temp_sectors[128];
+      cache_read (temp_sectors, inode->data.indirect[count_allocated_indirect - 1], 0, 0, 512, NULL);
+
       for(int i = 0 ; i < iter ; i++){
-        //printf("last_indirect: %d\n", inode->data.last_indirect);
-        result = free_map_allocate(1, &inode->data.indirect[count_allocated_indirect - 1]->direct[i+last_indirect]);
-        //printf("direct[63] sector num : %d\n",inode->data.direct[63]);
-        //printf("total_sector_num %d\n",total_sector_num);
-        //printf("current_sector_num %d\n",current_sector_num);
+        result = free_map_allocate(1, &temp_sectors[i+last_indirect]);
         if (!result)
           return result;
-        block_write (fs_device, inode->data.indirect[count_allocated_indirect - 1]->direct[i+last_indirect], zeros);
-        
+        block_write (fs_device, temp_sectors[i+last_indirect], zeros);
       }
+      cache_write (temp_sectors, inode->data.indirect[count_allocated_indirect - 1], 0, 0, 512);
       indirect_num -= iter;
       inode->data.last_indirect = (inode->data.last_indirect + iter) % 128 ;
     }
@@ -167,31 +155,37 @@ bool file_growth(struct inode* inode, off_t size, off_t offset)
       for (int i = 0; i < count_indirect_iteration; i++)
       {
         /* Indirect blocks allocation. */
-        inode->data.indirect[count_allocated_indirect + i] = (struct indirect_block *) malloc (sizeof(struct indirect_block));
+        result = free_map_allocate (1, &inode->data.indirect[count_allocated_indirect + i]);
         
         if (i != (count_indirect_iteration - 1))
         {
+          block_sector_t temp_sectors[128];
+
           for (int j = 0; j < 128; j++)
           {
-            result = free_map_allocate(1, &inode->data.indirect[count_allocated_indirect+ i]->direct[j]);
+            result = free_map_allocate(1, &temp_sectors[j]);
             if (!result)
               return result;
-            block_write (fs_device, inode->data.indirect[count_allocated_indirect+ i]->direct[j],zeros);
+            block_write (fs_device, temp_sectors[j], zeros);
           }
+          cache_write (temp_sectors, inode->data.indirect[count_allocated_indirect+ i], 0, 0, 512);
           indirect_num -= 128;
         }
         else if (i == count_indirect_iteration - 1)
         {
           int iteration = indirect_num;
-         
+          block_sector_t temp_sectors[128];
+
           for (int j = 0; j < iteration; j++)
           {
-            result = free_map_allocate(1, &inode->data.indirect[count_allocated_indirect+ i]->direct[j]);
+            result = free_map_allocate(1, &temp_sectors[j]);
             //printf("indirect[0][0] sector num : %d\n",inode->data.indirect[0]->direct[0]);
             if (!result)
               return result;
-            block_write (fs_device, inode->data.indirect[count_allocated_indirect+ i]->direct[j],zeros);
+            block_write (fs_device, temp_sectors[j], zeros);
           }
+
+          cache_write(temp_sectors, inode->data.indirect[count_allocated_indirect+ i], 0, 0, 512);
 
           inode->data.last_indirect = indirect_num == 128 ? 0: indirect_num;
           inode->data.count_allocated_indirect += count_indirect_iteration;
@@ -202,13 +196,12 @@ bool file_growth(struct inode* inode, off_t size, off_t offset)
   }
 
   // doubly_indirect growth
-  if(doubly_indirect_num > 0){
-
-
+  if(doubly_indirect_num > 0)
+  {
     int count_allocated_doubly_indirect = inode->data.count_allocated_doubly_indirect;
 
     if(count_allocated_doubly_indirect == 0){
-      inode->data.doubly_indirect = (struct doubly_indirect_block *) malloc (sizeof (struct doubly_indirect_block));
+      free_map_allocate(1, &inode->data.doubly_indirect);
     }
 
     if(last_doubly_indirect !=  0){
@@ -217,12 +210,20 @@ bool file_growth(struct inode* inode, off_t size, off_t offset)
                                     ? doubly_indirect_num 
                                     : (128 - last_doubly_indirect );
 
-      for(int i = 0 ; i < iter ; i++){
-        result = free_map_allocate(1, &inode->data.doubly_indirect->indirect[count_allocated_doubly_indirect - 1]->direct[i+last_doubly_indirect]);
+      block_sector_t temp_indirect;
+      cache_read (&temp_indirect, inode->data.doubly_indirect, 0, 4 * (count_allocated_doubly_indirect - 1), 4, NULL);
+      block_sector_t temp_sectors[128];
+      cache_read (temp_sectors, temp_indirect, 0, 0, 512, NULL);
+
+      for(int i = 0 ; i < iter ; i++)
+      {
+        result = free_map_allocate(1, &temp_sectors[i+last_doubly_indirect]);
         if (!result)
           return result;
-        block_write (fs_device, inode->data.doubly_indirect->indirect[count_allocated_doubly_indirect - 1]->direct[i+last_doubly_indirect] ,zeros);
       }
+
+      cache_write (temp_sectors, temp_indirect, 0, 0, 512);
+
       doubly_indirect_num -= iter;
       inode->data.last_doubly_indirect = (inode->data.last_doubly_indirect + iter) % 128 ;
     }
@@ -230,21 +231,27 @@ bool file_growth(struct inode* inode, off_t size, off_t offset)
     if(doubly_indirect_num > 0){
 
       int count_doubly_indirect_iteration = DIV_ROUND_UP(doubly_indirect_num,128);
+      block_sector_t temp_indirects[128];
+      cache_read (temp_indirects, inode->data.doubly_indirect, 0, 0, 512, NULL);
   
       for (int i = 0; i < count_doubly_indirect_iteration; i++)
       {
         /* Indirect blocks allocation. */
-        inode->data.doubly_indirect->indirect[count_allocated_doubly_indirect + i] = (struct indirect_block *) malloc (sizeof(struct indirect_block));
+        result = free_map_allocate (1, &temp_indirects[count_allocated_doubly_indirect + i]);
+       
+        block_sector_t temp_sectors[128];
+        cache_read (temp_sectors, temp_indirects[count_allocated_doubly_indirect + i], 0, 0, 512, NULL);
 
         if (i != (count_doubly_indirect_iteration - 1))
         {
           for (int j = 0; j < 128; j++)
           {
-            result = free_map_allocate(1, &inode->data.doubly_indirect->indirect[count_allocated_doubly_indirect+ i]->direct[j]);
+            result = free_map_allocate(1, &temp_sectors[j]);
             if (!result)
-              return result;
-            block_write (fs_device,inode->data.doubly_indirect->indirect[count_allocated_doubly_indirect+ i]->direct[j],zeros);
+              return result; 
           }
+
+          cache_write (temp_sectors, temp_indirects[count_allocated_doubly_indirect + i], 0, 0, 512);
           doubly_indirect_num -= 128;
         }
         else if (i == count_doubly_indirect_iteration - 1)
@@ -253,17 +260,19 @@ bool file_growth(struct inode* inode, off_t size, off_t offset)
         
           for (int j = 0; j < iteration; j++)
           {
-            result = free_map_allocate(1, &inode->data.doubly_indirect->indirect[count_allocated_doubly_indirect+ i]->direct[j]);
+            result = free_map_allocate(1, &temp_sectors[j]);
             if (!result)
               return result;
-            block_write (fs_device,inode->data.doubly_indirect->indirect[count_allocated_doubly_indirect+ i]->direct[j],zeros);
           }
 
+          cache_write (temp_sectors, temp_indirects[count_allocated_doubly_indirect + i], 0, 0, 512);
           inode->data.last_doubly_indirect = doubly_indirect_num == 128 ? 0: doubly_indirect_num;
           inode->data.count_allocated_doubly_indirect += count_doubly_indirect_iteration;
     
         }      
       }
+
+      cache_write (temp_indirects, inode->data.doubly_indirect, 0, 0, 512);
     }
 
   }
@@ -296,6 +305,9 @@ inode_allocate (size_t sectors, struct inode_disk *disk_inode)
   int count_direct_iteration = 0;
   int count_indirect_iteration = 0;
   int count_doubly_indirect_iteration = 0;
+
+  static char zeros[BLOCK_SECTOR_SIZE];
+  memset(zeros,0,BLOCK_SECTOR_SIZE);
 
 
 
@@ -334,6 +346,7 @@ inode_allocate (size_t sectors, struct inode_disk *disk_inode)
       result = free_map_allocate(1, &disk_inode->direct[i]);
       if (!result)
         break;
+      block_write (fs_device, disk_inode->direct[i], zeros);
     }
   }
   
@@ -344,28 +357,35 @@ inode_allocate (size_t sectors, struct inode_disk *disk_inode)
     for (int i = 0; i < count_indirect_iteration; i++)
     {
       /* Indirect blocks allocation. */
-      disk_inode->indirect[i] = (struct indirect_block *) malloc (sizeof(struct indirect_block));
+      result = free_map_allocate(1, &disk_inode->indirect[i]);
 
       if (i != (count_indirect_iteration - 1))
       {
+        block_sector_t temp_sectors[128];
+
         for (int j = 0; j < 128; j++)
         {
-          result = free_map_allocate(1, &disk_inode->indirect[i]->direct[j]);
+          result = free_map_allocate(1, &temp_sectors[j]);
           if (!result)
             break;
+          block_write (fs_device, temp_sectors[j], zeros);
         }
+        cache_write(temp_sectors, disk_inode->indirect[i], 0, 0, 512);
       }
       else if (i == count_indirect_iteration - 1)
       {
         int iteration = remain_indirect_sector == 0 ? 128 : remain_indirect_sector;
         disk_inode->last_indirect = remain_indirect_sector;
-
+        block_sector_t temp_sectors[128];
+        
         for (int j = 0; j < iteration; j++)
         {
-          result = free_map_allocate(1, &disk_inode->indirect[i]->direct[j]);
+          result = free_map_allocate(1, &temp_sectors[j]);
           if (!result)
             break;
+          block_write (fs_device, temp_sectors[j], zeros);
         }
+        cache_write(temp_sectors, disk_inode->indirect[i], 0, 0, 512);
       }      
     }
   }
@@ -375,20 +395,23 @@ inode_allocate (size_t sectors, struct inode_disk *disk_inode)
     disk_inode->count_allocated_doubly_indirect = count_doubly_indirect_iteration;
     
     /* Doubly indirect block allocation. */
-    disk_inode->doubly_indirect = (struct doubly_indirect_block *) malloc (sizeof (struct doubly_indirect_block));
+    result = free_map_allocate (1, &disk_inode->doubly_indirect);
+    block_sector_t temp_indirects[128];
 
     for (int i = 0; i < count_doubly_indirect_iteration; i++)
     {
       /* doubly_indirect->indirect allocation. */
-      disk_inode->doubly_indirect->indirect[i] = (struct indirect_block *) malloc (sizeof(struct indirect_block));
-
+      result = free_map_allocate (1, &temp_indirects[i]);
+      block_sector_t temp_sectors[128];
+      
       if (i != (count_doubly_indirect_iteration - 1))
       {
         for (int j = 0; j < 128; j++)
         {
-          result = free_map_allocate(1, &disk_inode->doubly_indirect->indirect[i]->direct[j]);
+          result = free_map_allocate(1, &temp_sectors[j]);
           if (!result)
             break;
+          block_write (fs_device, temp_sectors[j], zeros);
         }
       }
       else if (i == count_doubly_indirect_iteration - 1)
@@ -398,12 +421,18 @@ inode_allocate (size_t sectors, struct inode_disk *disk_inode)
 
         for (int j = 0; j < iteration; j++)
         {
-          result = free_map_allocate(1, &disk_inode->doubly_indirect->indirect[i]->direct[j]);
+          result = free_map_allocate(1, &temp_sectors[j]);
           if (!result)
             break;
+          block_write (fs_device, temp_sectors[j], zeros);
         }
       }
+
+      cache_write (temp_sectors, temp_indirects[i], 0, 0, 512);
+
     }
+
+    cache_write (temp_indirects, disk_inode->doubly_indirect, 0, 0, 512);
   }
 
   //printf("count_direct_iteration %d \n",count_direct_iteration);
@@ -436,39 +465,50 @@ inode_release (struct inode_disk *disk_inode)
   /* Free indirect blocks. */
   for (i = 0; i < disk_inode->count_allocated_indirect; i++)
   {
+    block_sector_t temp_sectors[128];
+    cache_read(temp_sectors, disk_inode->indirect[i], 0, 0, 512, NULL);
+    
     if (i != (disk_inode->count_allocated_indirect - 1))
     {
       for (j = 0; j < 128; j++)
-        free_map_release (disk_inode->indirect[i]->direct[j], 1);
+        free_map_release (temp_sectors[j], 1);
     }
     else
     {
       for (j = 0; j < disk_inode->last_indirect; j++)
-        free_map_release (disk_inode->indirect[i]->direct[j], 1);
+        free_map_release (temp_sectors[j], 1);
     }
 
-    free (disk_inode->indirect[i]);
+    free_map_release (disk_inode->indirect[i], 1);
   }
 
   /* Free doubly indirect blocks. */
-  for (i = 0; i < disk_inode->count_allocated_doubly_indirect; i++)
+  if (disk_inode->count_allocated_doubly_indirect > 0)
   {
-    if (i != (disk_inode->count_allocated_doubly_indirect - 1))
+    block_sector_t temp_indirects[128];
+    cache_read (temp_indirects, disk_inode->doubly_indirect, 0, 0, 512, NULL);
+    for (i = 0; i < disk_inode->count_allocated_doubly_indirect; i++)
     {
-      for (j = 0; j < 128; j++)
-        free_map_release (disk_inode->doubly_indirect->indirect[i]->direct[j], 1);
-      
-      free (disk_inode->doubly_indirect->indirect[i]);
-    }
-    else
-    {
-      for (j = 0; j < disk_inode->last_doubly_indirect; j++)
-        free_map_release (disk_inode->doubly_indirect->indirect[i]->direct[j], 1);
-      
-      free (disk_inode->doubly_indirect->indirect[i]);
-      free (disk_inode->doubly_indirect);
+      block_sector_t temp_sectors[128];
+      cache_read (temp_sectors, temp_indirects[i], 0, 0, 512, NULL);
+      if (i != (disk_inode->count_allocated_doubly_indirect - 1))
+      {
+        for (j = 0; j < 128; j++)
+          free_map_release (temp_sectors[j], 1);
+        
+        free_map_release (temp_indirects[i], 1);
+      }
+      else
+      {
+        for (j = 0; j < disk_inode->last_doubly_indirect; j++)
+          free_map_release (temp_sectors[j], 1);
+        
+        free_map_release (temp_indirects[i], 1);
+        free_map_release (disk_inode->doubly_indirect, 1);
+      }
     }
   }
+  
 }
 
 /* Write all inode for disk data into disk. */
@@ -480,28 +520,50 @@ inode_disk_write_all (char *zeros, struct inode_disk *disk_inode)
 
   for (int i = 0; i < disk_inode->count_allocated_indirect; i++)
   {
-    if (i != (disk_inode->count_allocated_indirect - 1))  
+    if (i != (disk_inode->count_allocated_indirect - 1))
+    {
+      block_sector_t temp_sectors[128];
+      cache_read(temp_sectors, disk_inode->indirect[i], 0, 0, 512, NULL);
+
       for (int j = 0; j < 128; j++)
-        block_write (fs_device, disk_inode->indirect[i]->direct[j], zeros);
+        block_write (fs_device, temp_sectors[j], zeros);
+    }
     else
+    {
+      block_sector_t temp_sectors[128];
+      cache_read(temp_sectors, disk_inode->indirect[i], 0, 0, 512, NULL);
+
       for (int j = 0; j < disk_inode->last_indirect; j++)
-        block_write (fs_device, disk_inode->indirect[i]->direct[j], zeros);
+        block_write (fs_device, temp_sectors[j], zeros);
+    }
   }
 
-  for (int i = 0; i < disk_inode->count_allocated_doubly_indirect; i++)
+  if (disk_inode->count_allocated_doubly_indirect > 0)
   {
-    if (i != (disk_inode->count_allocated_doubly_indirect - 1))
-      for (int j = 0; j < 128; j++)
-        block_write (fs_device, disk_inode->doubly_indirect->indirect[i]->direct[j], zeros);
-    else
-      for (int j = 0; j < disk_inode->last_doubly_indirect; j++)
-        block_write (fs_device, disk_inode->doubly_indirect->indirect[i]->direct[j], zeros);
+    block_sector_t temp_indirects[128];
+    cache_read (temp_indirects, disk_inode->doubly_indirect, 0, 0, 512, NULL);
+
+    for (int i = 0; i < disk_inode->count_allocated_doubly_indirect; i++)
+    {
+      block_sector_t temp_sectors[128];
+      cache_read (temp_sectors, temp_indirects[i], 0, 0, 512, NULL);
+      
+      if (i != (disk_inode->count_allocated_doubly_indirect - 1))
+        for (int j = 0; j < 128; j++)
+          block_write (fs_device, temp_sectors[j], zeros);
+      else
+        for (int j = 0; j < disk_inode->last_doubly_indirect; j++)
+          block_write (fs_device, temp_sectors[j], zeros);
+    }
   }
 }
 
 int32_t
 get_next_sector (struct inode* inode, block_sector_t current_sector)
 {
+  if (inode == NULL)
+    return -1;
+
   int last_direct = inode->data.last_direct;
   int last_indirect = inode->data.last_indirect;
   int last_doubly_indirect = inode->data.last_doubly_indirect;
@@ -523,7 +585,11 @@ get_next_sector (struct inode* inode, block_sector_t current_sector)
         else
         {
           if (count_allocated_indirect != 0)
-            return inode->data.indirect[0]->direct[0];
+          {
+            block_sector_t temp_sector;
+            cache_read (&temp_sector, inode->data.indirect[0], 0, 0, 4, NULL);
+            return temp_sector;
+          }
           else
             return -1;
         }
@@ -537,14 +603,21 @@ get_next_sector (struct inode* inode, block_sector_t current_sector)
   {
     if (i != count_allocated_indirect - 1)
     {
+      block_sector_t temp_sectors[128];
+      cache_read (temp_sectors, inode->data.indirect[i], 0, 0, 512, NULL);
+
       for (j = 0; j < 128; j++)
       {
-        if (inode->data.indirect[i]->direct[j] == current_sector)
+        if (temp_sectors[j] == current_sector)
         {
           if (j != 127)
-            return inode->data.indirect[i]->direct[j + 1];
+            return temp_sectors[j + 1];
           else
-            return inode->data.indirect[i + 1]->direct[0];
+          {
+            block_sector_t temp_sector;
+            cache_read (&temp_sector, inode->data.indirect[i + 1], 0, 0, 4, NULL);
+            return temp_sector;
+          }
         }
       }
     }
@@ -552,12 +625,15 @@ get_next_sector (struct inode* inode, block_sector_t current_sector)
     {
       if (last_indirect != 0)
       {
+        block_sector_t temp_sectors[128];
+        cache_read(temp_sectors, inode->data.indirect[i], 0, 0, 512, NULL);
+
         for (j = 0; j < last_indirect; j++)
         {
-          if (inode->data.indirect[i]->direct[j] == current_sector)
+          if (temp_sectors[j] == current_sector)
           {
             if (j != (last_indirect - 1))
-              return inode->data.indirect[i]->direct[j + 1];
+              return temp_sectors[j + 1];
             else
               return -1;
           }
@@ -565,18 +641,25 @@ get_next_sector (struct inode* inode, block_sector_t current_sector)
       }
       else
       {
+        block_sector_t temp_sectors[128];
+        cache_read(temp_sectors, inode->data.indirect[i], 0, 0, 512, NULL);
         for (j = 0; j < 128; j++)
         {
-          if (inode->data.indirect[i]->direct[j] == current_sector)
+          if (temp_sectors[j] == current_sector)
           {
             if (j != 127)
-              return inode->data.indirect[i]->direct[j + 1];
+              return temp_sectors[j + 1];
             else if (count_allocated_indirect < 4)
               return -1;
             else if (count_allocated_indirect == 4)
             {
               if (count_allocated_doubly_indirect != 0)
-                return inode->data.doubly_indirect->indirect[0]->direct[0];
+              {
+                block_sector_t temp_indirect, temp_sector;
+                cache_read (&temp_indirect, inode->data.doubly_indirect, 0, 0, 4, NULL);
+                cache_read (&temp_sector, temp_indirect, 0, 0, 4, NULL);
+                return temp_sector;
+              }
               else
                 return -1;
             }
@@ -587,33 +670,46 @@ get_next_sector (struct inode* inode, block_sector_t current_sector)
   }
 
   /* Find current_sector from doubly indirect blocks. */
-  for (i = 0; i < count_allocated_doubly_indirect; i++)
+  if (count_allocated_doubly_indirect > 0 )
   {
-    if (i != count_allocated_doubly_indirect - 1)
+    block_sector_t temp_indirects[128];
+    cache_read (temp_indirects, inode->data.doubly_indirect, 0, 0, 512, NULL);
+
+    for (i = 0; i < count_allocated_doubly_indirect; i++)
     {
-      for (j = 0; j < 128; j++)
+      block_sector_t temp_sectors[128];
+      cache_read (temp_sectors, temp_indirects[i], 0, 0, 512, NULL);
+
+      if (i != count_allocated_doubly_indirect - 1)
       {
-        if (inode->data.doubly_indirect->indirect[i]->direct[j] == current_sector)
+        for (j = 0; j < 128; j++)
         {
-          if (j != 127)
-            return inode->data.doubly_indirect->indirect[i]->direct[j + 1];
-          else
-            return inode->data.doubly_indirect->indirect[i + 1]->direct[0];
+          if (temp_sectors[j] == current_sector)
+          {
+            if (j != 127)
+              return temp_sectors[j + 1];
+            else
+            {
+              block_sector_t temp;
+              cache_read (&temp, temp_indirects[i + 1], 0, 0, 4, NULL);
+              return temp;
+            }
+          }
         }
       }
-    }
-    else
-    {
-      int iter = last_doubly_indirect == 0 ? 128 : last_doubly_indirect;
-
-      for (j = 0; j < iter; j++)
+      else
       {
-        if (inode->data.doubly_indirect->indirect[i]->direct[j] == current_sector)
+        int iter = last_doubly_indirect == 0 ? 128 : last_doubly_indirect;
+
+        for (j = 0; j < iter; j++)
         {
-          if (j != (iter - 1))
-            return inode->data.doubly_indirect->indirect[i]->direct[j + 1];
-          else
-            return -1;
+          if (temp_sectors[j] == current_sector)
+          {
+            if (j != (iter - 1))
+              return temp_sectors[j + 1];
+            else
+              return -1;
+          }
         }
       }
     }
@@ -655,18 +751,27 @@ byte_to_sector (const struct inode *inode, off_t pos)
   {
     uint32_t indirect_pos = (sector_pos - MAX_DIRECT) / 128;
     uint32_t direct_pos = (sector_pos - MAX_DIRECT) % 128;
-    result = inode->data.indirect[indirect_pos]->direct[direct_pos];
-    //printf("indirect[%d]->direct[%d] = %d\n",indirect_pos, direct_pos, result);
-    
+
+    block_sector_t temp_sector;
+    cache_read(&temp_sector, inode->data.indirect[indirect_pos], 0, 4 * direct_pos, 4, NULL);
+
+    result = temp_sector;
   }
   else if (sector_pos < (MAX_DIRECT + MAX_INDIRECT * 128 + 128 * 128))
   {
     uint32_t doubly_indirect_pos = (sector_pos - ((MAX_DIRECT + MAX_INDIRECT * 128))) / 128;
     uint32_t direct_pos = (sector_pos - ((MAX_DIRECT + MAX_INDIRECT * 128))) % 128;
-    result = inode->data.doubly_indirect->indirect[doubly_indirect_pos]->direct[direct_pos];
+
+    block_sector_t temp_indirect, temp_sector;
+    cache_read (&temp_indirect, inode->data.doubly_indirect, 0, doubly_indirect_pos * 4, 4, NULL);
+    cache_read (&temp_sector, temp_indirect, 0, 4 * direct_pos, 4, NULL);
+
+    result = temp_sector;
   }
   else
     result = -1;
+  
+  
 
   return result;
 }
@@ -691,6 +796,8 @@ inode_init (void)
 bool
 inode_create (block_sector_t sector, off_t length, bool is_dir)
 {
+  /* We added a boolean IS_DIR to identify that this inode is
+     for directory or not. */
   struct inode_disk *disk_inode = NULL;
   bool success = false;
 
@@ -758,9 +865,7 @@ inode_open (block_sector_t sector)
   inode->deny_write_cnt = 0;
   inode->removed = false;
   cache_read (&inode->data, inode->sector, 0, 0, BLOCK_SECTOR_SIZE,inode);
-  //printf("inode->sector: %d in open()\n", inode->sector);
-  //printf("inode->data.length: %d in open()\n", inode->data.length);
-  //block_read (fs_device, inode->sector, &inode->data);
+  
   return inode;
 }
 
