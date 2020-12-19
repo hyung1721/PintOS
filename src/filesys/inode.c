@@ -74,7 +74,7 @@ bool file_growth(struct inode* inode, off_t size, off_t offset)
   int max_length = size + offset;
   int total_sector_num = bytes_to_sectors(max_length);
   int current_sector_num = bytes_to_sectors(inode->data.length);
-  
+
   int left = total_sector_num - current_sector_num;
 
   //printf("total_sector_num %d\n",total_sector_num);
@@ -601,6 +601,7 @@ get_next_sector (struct inode* inode, block_sector_t current_sector)
   /* Find current_sector from indirect blocks. */
   for (i = 0; i < count_allocated_indirect; i++)
   {
+    // if not last it is full
     if (i != count_allocated_indirect - 1)
     {
       block_sector_t temp_sectors[128];
@@ -987,7 +988,6 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
       offset += chunk_size;
       bytes_read += chunk_size;
     }
-  //free(bounce);
 
   return bytes_read;
 }
@@ -1011,10 +1011,9 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
   if (inode->deny_write_cnt)
     return 0;
 
-
   if(size+ offset > inode->data.length ){
-    result = file_growth(inode, size, offset);
-     if(!result) ASSERT(0); //handling??
+    result = file_growth(inode, size, offset); 
+    if(!result) ASSERT(0); //handling??
     //printf("FILE GROWTH size : %d  offset : %d length : %d\n",size,offset, inode->data.length);
   }
 
@@ -1074,7 +1073,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
       offset += chunk_size;
       bytes_written += chunk_size;
     }
-  //printf("check\n");
+  
   return bytes_written;
 }
 

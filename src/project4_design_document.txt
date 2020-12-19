@@ -1,0 +1,429 @@
+			+----------------------------+
+			|	CS 330	           |
+			| PROJECT 4 : FILE SYSTEMS|
+			|     DESIGN DOCUMENT    |
+			+----------------------------+
+
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
+
+김우진 <hyung1721@kaist.ac.kr>
+김준범 <dungeon12345@kaist.ac.kr>
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+# of tokens to use = 6
+
+Contribution
+김우진: 50%
+김준범: 50%
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+		     INDEXED AND EXTENSIBLE FILES
+		     ============================
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+Indexed file을 구현하기 위해서 inode_disk 구조체를 다음과 같이 수정하였다.
+
+/* On-disk inode.
+   Must be exactly BLOCK_SECTOR_SIZE bytes long. */
+struct inode_disk
+  {
+    block_sector_t direct[MAX_DIRECT];        /* Direct blocks. */
+    block_sector_t indirect[MAX_INDIRECT];    /* Indirect blocks. */
+    block_sector_t doubly_indirect;           /* Doubly indirect blocks. */
+
+    /* # of direct blocks. */
+    uint32_t last_direct;
+    /* # of allocated indirect blocks. */
+    uint32_t count_allocated_indirect;
+    /* # of direct blocks in last indirect block. */
+    uint32_t last_indirect;
+    /* # of allocated indirect blocks in doubly indirect block. */
+    uint32_t count_allocated_doubly_indirect;   
+    /* # of direct blocks in last indirect block in doubly indirect block. */
+    uint32_t last_doubly_indirect;
+
+    bool is_dir;        
+
+    off_t length;                       /* File size in bytes. */
+    unsigned magic;                     /* Magic number. */
+    uint32_t unused[51];               /* Not used. */
+  };
+
+우리는 Linux처럼 direct block, indirect block, doubly indirect block을
+왈용하여 indexed file을 구현하였다.
+
+direct 배열에는 파일의 첫 128개의 block의 sector number들이 담긴다.
+indirect 배열에는 direct block sector들이 담겨있는 block의 sector number들을 담는다.
+doubly indirect는 indirect block sector number들이 담겨있는 block의 sector number
+를 담는다.
+
+last_direct는 direct 배열에 담긴 block의 수를 나타낸다.
+count_allocated_indirect는 indirect 배열에 몇개의 indirect block이 있는지 나타낸다.
+last_indirect는 indirect 배열에서 할당되어 있는 마지막 indirect block 내에 담긴
+direct block의 수를 나타낸다.
+count_allocated_doubly_indirect는 doubly indirect가 가리키는 block에 담긴
+indirect block의 수를 나타낸다.
+last_doubly_indirect는 위의 block에서 마지막에 할당되어 있는 indirect block에
+담긴 direct block의 수를 나타낸다.
+
+>> A2: What is the maximum size of a file supported by your inode
+>> structure?  Show your work.
+
+한 block에는 4B짜리 변수가 128개 저장될 수 있다.
+
+direct 배열에는 128개의 block sector가 저장될 수 있으므로 
+128 * 512B = 64KB를 지원한다.
+
+indirect 배열에는 indirect block sector가 4개 저장되고, 
+각 indirect block sector는 128개의 direct block sector가 담긴 block을
+가리키므로 4 * 128 * 512 = 256 KB를 지원한다.
+
+doubly indirect는 indirect block이 128개 저장될 수 있는 block을 가리키므로
+128 * 128 * 512 = 8,192KB = 8 MB를 지원한다.
+
+따라서 총합, 약 8.3MB크기의 파일까지 지원할 수 있다.
+
+---- SYNCHRONIZATION ----
+
+>> A3: Explain how your code avoids a race if two processes attempt to
+>> extend a file at the same time.
+
+file을 extend할 때 cache_write 함수를 활용한다. 즉, file을 확장해 쓰는 과정이
+buffer cache에서 이루어지는 것이고 buffer cache의 한칸 마다 lock이 있기 때문에
+두 process가 동시에 file 확장을 하는 것에 대한 synchronization이 맞춰진다.
+
+>> A4: Suppose processes A and B both have file F open, both
+>> positioned at end-of-file.  If A reads and B writes F at the same
+>> time, A may read all, part, or none of what B writes.  However, A
+>> may not read data other than what B writes, e.g. if B writes
+>> nonzero data, A is not allowed to see all zeros.  Explain how your
+>> code avoids this race.
+
+File growth을 진행한 다음에 data를 옮겨 써주면, 그 사이에 다른 process가
+확장은 되었지만 initialize되지 않은 영역을 읽어 trash값을 읽게 될 수 있다.
+이를 해결하는 방법은 file growth를 하면서 바로 data를 넣어주는 것이다.
+그러면 원래는 File growth이후 inode→data.length가 update된 다음 data를 
+넣어줬던 것이 File growth 및 data intializing이 끝난 뒤에 node->data.length가 
+업데이트 되는 것으로 바뀐다.  inode→data.length 가 업데이트 되기 전에는 
+context switch가 일어나도, 다른 process가 확장되었다는 것을 알지 
+못하기 때문에 data가 입력되기 전에는 해당 영역을 읽을 수 없게 된다. 
+
+>> A5: Explain how your synchronization design provides "fairness".
+>> File access is "fair" if readers cannot indefinitely block writers
+>> or vice versa.  That is, many processes reading from a file cannot
+>> prevent forever another process from writing the file, and many
+>> processes writing to a file cannot prevent another process forever
+>> from reading the file.
+
+우리가 만든 Project4 디자인은 process간의 priority와 priority based 
+scheduling이 없는 상태이다. 따라서 모든 process의 priority가 동일하며
+yield 등에 의해 context switch가 되면 예외없이 ready list의 맨뒤에 간다.
+따라서 context switch의 관점에서는 모든 프로세스가 동일하게 자신의 
+순서를  기다리는 것이다. 또한, file system의 read, write을 담당하는
+inode_read_at(), inode_write_at()에 관한 lock이 없기 때문에 모든 process
+에게 fair한 기회가 제공된다. 
+
+---- RATIONALE ----
+
+>> A6: Is your inode structure a multilevel index?  If so, why did you
+>> choose this particular combination of direct, indirect, and doubly
+>> indirect blocks?  If not, why did you choose an alternative inode
+>> structure, and what advantages and disadvantages does your
+>> structure have, compared to a multilevel index?
+
+Linux의 inode implementation을 참고하였기 때문에 multilevel index를 활용하여
+inode structure를 구현하였다. 그리고 direct, indirect block들의 sector number를
+저장하기 위해서 배열과 디스크 공간을 모두 활용하였는데, 디스크 공간까지 사용하게 된 이유는 다음과 같다.
+
+원래는, block sector number들에 대한 정보를 저장하기 위해서 physical memory에 block
+sector number들이 담긴 구조체를 malloc을 통해서 할당하였다. 디스크를 더 효율적으로 사용하기
+위함이었지만, 이는 pintos를 재부팅하는 과정에서 해당 메모리가 유실되기 때문에 file system
+자체의 persistence를 관리하는데 적합하지 않은 방법이라는 결론을 얻었다. 따라서, 각 block sector
+들에 대한 정보를 disk 상에 저장해두어야 pintos를 재부팅하더라도 그 file들에 정확하게 접근할 수
+있고, 따라서 이런 multilevel index를 사용하게 되었다.
+
+			    SUBDIRECTORIES
+			    ==============
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+다음은 inode_disk 구조체의 일부이다.
+
+/* On-disk inode.
+   Must be exactly BLOCK_SECTOR_SIZE bytes long. */
+struct inode_disk
+  {
+    ...
+    bool is_dir;        
+    ...
+  };
+
+inode가 파일에 대한 inode인지, directory에 대한 inode인지를 표현하기 위해서
+boolean 변수 is_dir을 추가하였다. 이 변수는 inode_create() 함수가 호출될 때
+적절한 값으로 설정된다.
+
+다음은 thread.h에서 수정한 thread 구조체의 일부이다.
+
+struct thread
+  {
+    ...
+    struct dir *current_dir;
+    struct dir *directory_table[FD_MAX_SIZE];
+  }
+
+current_dir는 현재 프로세스가 위치한 directy의 dir 구조체의 주소를 담는다.
+directory_table은 readdir 함수에서 사용하기 위해서 추가한 포인터 배열로,
+프로세스가 열었던 directory의 fd를 index로 하여 그 directory들의 dir 구조체 포인터
+값을 담는다.
+
+
+---- ALGORITHMS ----
+
+>> B2: Describe your code for traversing a user-specified path.  How
+>> do traversals of absolute and relative paths differ?
+
+parsing_file_name() 함수에서 user-specified path로 주어진 string의
+첫번째 character가 '/'인지 아닌지로 absolute path와 relative path를
+구분한다. absolute path인 경우에 root directory부터 시작, relative
+path인 경우 해당 process의 current working directory부터 시작한다.
+반복문을 돌면서 parsing한 path name을 검사해서 특정 directory안에
+해당 파일 및 directory가 있는지를 확인하다.
+
+---- SYNCHRONIZATION ----
+
+>> B4: How do you prevent races on directory entries?  For example,
+>> only one of two simultaneous attempts to remove a single file
+>> should succeed, as should only one of two simultaneous attempts to
+>> create a file with the same name, and so on.
+
+User program이 directory를 생성하거나 제거하는 것은 모두 system call을 통해
+이루어진다. 우리의 디자인에는 system call 전후에 lock이 있어 서로 다른 두
+process가 directory나 file을 동시에 생성, 제거하는 것이 불가능하다.
+
+>> B5: Does your implementation allow a directory to be removed if it
+>> is open by a process or if it is in use as a process's current
+>> working directory?  If so, what happens to that process's future
+>> file system operations?  If not, how do you prevent it?
+
+특정 process의 current working directory이더라도 지워질 수 있게 했다.
+해당 directory를 working directory로 사용하던 process는 이후 directory에 관한
+system call을 사용할 때 dir_look_up 함수 등에 있는 error 처리문에 의해서
+false를 return하게 된다.
+
+---- RATIONALE ----
+
+>> B6: Explain why you chose to represent the current directory of a
+>> process the way you did.
+
+우리는 thread 구조체에 current_dir이라는 변수를 추가하여 프로세스의 현재 디렉토리를 표현하였다.
+
+처음에 새롭게 만들어지는 프로세스는 (main thread와 같은 경우) 현재 디렉토리가 root 디렉토리로
+만들어진다. 부모 프로세스가 process_execute()를 통해서 자식 프로세스를 만들 때는 부모 프로세스의 
+current_dir와 같은 디렉토리를 가지게 한다.
+
+이렇게 한 이유는 pintos는 thead와 프로세스가 일대일 대응이며, 프로세스마다 다른 현재 디렉토리 경로를
+가질 수 있기 때문이다.
+
+			     BUFFER CACHE
+			     ============
+
+---- DATA STRUCTURES ----
+
+>> C1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+다음은 filesys.c에 추가한 전역 변수이다.
+
+bool flag_filesys_done;
+
+file system이 종료되었는지를 나타내는 boolean 변수이다.
+
+다음은 새로운 파일 cache.c에 추가한 cache_slot 구조체와 관련 전역 변수들이다.
+
+struct cache_slot
+{
+    bool used;                       // Used slot or not.
+    bool dirty;                      // Dirty bit.
+    bool accessed;                   // Accessed bit.
+
+    int index;                       // Index for the slot.
+
+    uint8_t data[BLOCK_SECTOR_SIZE]; // Cached block data.
+    block_sector_t sector;           // Original block sector index.
+};
+
+struct cache_slot buffer_cache[MAX_CACHE_SIZE];
+int hand_index = 0;                 // For clock algorithm.
+
+struct lock buffer_cache_op_lock;
+struct lock buffer_cache_lock[MAX_CACHE_SIZE];
+
+buffer_cache는 cache_slot 구조체를 담는 구조체 배열로써, 64개의 cache slot을 관리한다.
+하나의 cache slot은 buffer cache block에 해당한다.
+
+cache_slot 구조체는 여러 boolean 변수와 block data를 가지고 있다.
+used 변수는 이 slot이 사용 중인지 아닌지를 나타낸다.
+dirty 변수는 이 slot에 담긴 data가 dirty 상태인지 아닌지를 나타낸다.
+accessed 변수는 이 slot에 담긴 data가 accessed 상태인지 아닌지를 나타낸다.
+index 변수는 buffer_cache 구조체 배열에 담긴 이 slot의 인덱스를 나타낸다.
+data는 512B 크기의 디스크 block의 데이터를 저장하는 변수이다.
+sector는 이 block의 디스크 내의 실제 sector number를 나타낸다.
+
+hand_index는 eviction algorithm을 구현하기 위해서 필요한 변수이다.
+buffer_cache 구조체 배열의 인덱스 값들이 hand_index 변수의 값이 될 수 있다.
+
+buffer_cache_lock_op_lock은 cache operation을 동기화하기 위한 lock이다.
+buffer_cache_lock 배열은 각 cache slot에 대해서 동기화 작업을 해주기 위해서
+선언한 lock 배열이다.
+
+다음은 read-ahead를 구현하기 위해 cache.c에 추가한 구조체와 관련 전역 변수들이다.
+
+struct ahead_block
+{
+    block_sector_t sector;          // Sector number.
+    struct inode* inode;            // Inode pointer.
+    struct list_elem elem;          // List element.
+};
+
+struct list ahead_list;
+struct semaphore ahead_list_sema;
+
+ahead_block 구조체는 cache read operation이 수행된 block에 대한 정보를
+담고 있다.
+
+이 구조체는 ahead_list라는 list에 담겨져서 관리되며, read-ahead를 수행하는
+스레드에 의해서 ahead_list가 관리된다.
+
+ahead_list_sema는 read-ahead 작업을 asynchronous하게 수행하기 위해서 필요한
+semaphore이다.
+
+---- ALGORITHMS ----
+
+>> C2: Describe how your cache replacement algorithm chooses a cache
+>> block to evict.
+
+cache replacement algorithm은 cache_slot_alloc() 함수를 통해서 구현된다.
+
+clock algorithm을 바탕으로 구현하였고 과정은 다음과 같다.
+
+1) hand_index의 값에 해당하는 cache slot을 얻는다.
+2) cache slot의  accessed가 true라면 false로 바꾸고 hand_index를 다음 index로 바꾼다.
+3) 앞선 과정을 반복하다가 accessed가 false인 cache slot을 만나면 eviction process를 수행한다.
+4) eviction process는 해당 cache slot이 dirty이면 disk로 써주는 방식이다.
+
+>> C3: Describe your implementation of write-behind.
+
+write-behind는 다음의 두 가지 측면을 고려해야 한다.
+
+1. dirty block을 buffer cache 내에서 유지하다가, evict시 disk에 써준다.
+2. 주기적으로 dirty block들을 disk에 써준다.
+
+1번은 앞서 설명한 cache replacement algorithm에 의해서 구현된다.
+2번은 이 작업을 수행하는 thread를 만들어서 해결할 수 있다.
+
+cache_init() 함수에서는 write-behind라는 thread를 생성하여 주기적으로 이 스레드를
+일정 시간 재우고(timer_sleep) 깨우기를 반복하며 buffer_cache 내에 모든 dirty
+slot들을 disk로 내보낸다. 이 작업은 file system이 종료될 때까지 반복되기 때문에
+filesys_done() 함수에서 true로 설정되는 flag_filesys_done를 사용하여
+종료 시점을 표시하였다. 
+
+>> C4: Describe your implementation of read-ahead.
+
+read-ahead 작업 또한 이 작업을 수행하는 thread를 만들어서 해결하였다.
+
+cache_init() 함수에서는 read-ahead라는 thread를 생성하고, 이 thread가 수행하는
+함수인 read_ahead()는 ahead_list_sema를 항상 sema_down()하려고 시도한다.
+
+이 semaphore가 sema_up되는 경우는 항상 어떤 cache slot이 cache read되었을 때이다.
+cache read operation이 수행되면, 이 cache slot이 가지고 있는 data에 대응되는 sector
+number와 cache read operation을 호출한 inode에 대한 정보를 바탕으로 ahead_block
+구조체를 새롭게 만든다. 그리고 ahead_block_list에 이 ahead_block을 추가하고 sema_up을
+해준다.
+
+read_ahead()는 이렇게 sema_up이 되어서 새로운 ahead_block이 list에 추가되면
+FIFO를 기반으로 하여, 가장 먼저들어왔던 ahead_block에 있는 정보를 통해서 cache_read되었던
+block의 다음 block을 읽어온다. 만약 이미 다른 thread에 의해서 다음 block이 cache_read
+되었다면, read_ahead thread는 해당 block을 읽어오지 않는다.
+
+read_ahead()도 하나의 thread이기 때문에 어떤 thread가 cache read operation을
+수행한 것과 상관없이 background에서 asynchronous하게 작업을 수행한다.
+
+---- SYNCHRONIZATION ----
+
+>> C5: When one process is actively reading or writing data in a
+>> buffer cache block, how are other processes prevented from evicting
+>> that block?
+
+우리는 buffer cache의 slot마다 lock을 만들었고, 특정 slot을 write하거나 evict할 때
+slot 별 lock을 통해서 동기화 해준다. 따라서 한 프로세스가 어떤 cache slot에 접근 중이라면
+그 slot은 evict될 수 없다.
+
+>> C6: During the eviction of a block from the cache, how are other
+>> processes prevented from attempting to access the block?
+
+앞선 질문과 마찬가지로 특정 slot에 대한 접근은 slot 별 lock에 의해서 동기화되기 때문에
+slot이 victim으로 선정되어 evict되는 과정에서는 그 slot에 접근할 수 없다.
+
+---- RATIONALE ----
+
+>> C7: Describe a file workload likely to benefit from buffer caching,
+>> and workloads likely to benefit from read-ahead and write-behind.
+
+1) buffer caching
+buffer cache의 목적 자체가 disk operation을 줄이기 위한 것이기 때문에, 어떤 파일에 대한
+access가 많은 작업을 진행하는 프로세스라면 buffer cache에 그 파일의 내용들이 많이 cache
+되어 있을 것이기 때문에 buffer cache의 효율이 좋을 것이다.
+
+2) read-ahead
+프로세스가 특정 파일의 내용을 순차적으로 읽는 경우, read-ahead를 통해서 미리 다음 block들을
+cache에 옮겨놓기 때문에 프로세스는 cache에서 파일 데이터를 바로 가져다 쓸 수 있다. 직관적인 
+예시로는 비디오 파일 재생이 있다.
+
+3) write-behind
+Crash가 나기 쉬운 상황에서 file system이 구동된다고 생각해보자. 그러면 physical memory내에
+있는 데이터들이 손실되기 쉽기 때문에 buffer cache의 내용들 또한 손실될 수 있다.
+write-behind를 통해서 주기적으로 disk로 dirty block들을 내보내주면 파일의 손실을 최소화
+할 수 있을 것이다.
+
+			   SURVEY QUESTIONS
+			   ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students in future quarters?
+
+>> Any other comments?
